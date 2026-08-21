@@ -673,7 +673,7 @@ function processNewMessages() {
         } else {
             lastMsg.setAttribute('data-mcp-processed', 'true');
             waitingForResponse = false;
-            setBridgeStatus(STATUS_STATES.COMPLETED);
+            setBridgeStatus(STATUS_STATES.IDLE, '⚠️ ChatGPT trả lời văn bản (không có Tool Call)');
             markLastMessageCompleted(lastMsg);
         }
     }
@@ -728,19 +728,27 @@ function handleManualSend(e, editor) {
     
     if (needsFileOps && !isToolResult && !text.includes('mcp_tool_call')) {
         let reminder = generateDynamicSystemInstruction(isFollowUp, lastUsedPath, cachedActivePreset);
+        const fullText = reminder + '\n\n' + text;
         
         if (editor.tagName === 'TEXTAREA' || editor.tagName === 'INPUT') {
             const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
             if (nativeInputValueSetter) {
-                nativeInputValueSetter.call(editor, reminder + '\n\n' + text);
+                nativeInputValueSetter.call(editor, fullText);
             } else {
-                editor.value = reminder + '\n\n' + text;
+                editor.value = fullText;
             }
             editor.dispatchEvent(new Event('input', { bubbles: true }));
+            editor.dispatchEvent(new Event('change', { bubbles: true }));
         } else {
             editor.focus();
-            document.execCommand('selectAll', false, null);
-            document.execCommand('insertText', false, reminder + '\n\n' + text);
+            try {
+                document.execCommand('selectAll', false, null);
+                document.execCommand('insertText', false, fullText);
+            } catch (err) {
+                editor.textContent = fullText;
+            }
+            editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: fullText }));
+            editor.dispatchEvent(new Event('input', { bubbles: true }));
         }
     }
 }

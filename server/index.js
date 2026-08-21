@@ -288,8 +288,21 @@ const tools = {
         }
         
         const depth = args.depth ? parseInt(args.depth, 10) : 4;
-        const ignoreList = ['node_modules', '.git', 'dist', '.next', 'build', '.DS_Store'];
-        
+        const IGNORE_PATTERNS = new Set([
+            'node_modules', '.git', 'dist', '.next', 'build', '.build', 'DerivedData',
+            'vendor', 'coverage', '.cache', '.venv', 'venv', 'out', 'target', 'bin',
+            'obj', '.idea', '.vscode', '.output', '.nuxt', '.svelte-kit', '.DS_Store',
+            'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'Cargo.lock', 'composer.lock'
+        ]);
+
+        const CODE_EXTENSIONS = new Set([
+            '.js', '.jsx', '.ts', '.tsx', '.json', '.html', '.css', '.scss', '.less',
+            '.py', '.java', '.c', '.cpp', '.h', '.hpp', '.go', '.rs', '.php', '.rb',
+            '.vue', '.svelte', '.md', '.sql', '.sh', '.yaml', '.yml', '.toml', '.xml',
+            '.swift', '.m', '.mm', '.kt', '.dart'
+        ]);
+
+        const startTime = Date.now();
         const treeStats = {
             totalFiles: 0,
             totalDirs: 0,
@@ -298,8 +311,12 @@ const tools = {
             extensions: {}
         };
 
+        let totalTreeLines = 0;
+        const MAX_TREE_LINES = 250;
+        let truncated = false;
+
         async function traverse(currentPath, currentDepth, prefix = "") {
-            if (currentDepth > depth) return "";
+            if (currentDepth > depth || totalTreeLines >= MAX_TREE_LINES) return "";
             
             let entries = [];
             try {
@@ -308,7 +325,7 @@ const tools = {
                 return prefix + "└── [Error reading directory]\n";
             }
 
-            entries = entries.filter(e => !ignoreList.includes(e.name));
+            entries = entries.filter(e => !IGNORE_PATTERNS.has(e.name));
             
             entries.sort((a, b) => {
                 if (a.isDirectory() && !b.isDirectory()) return -1;
@@ -316,50 +333,70 @@ const tools = {
                 return a.name.localeCompare(b.name);
             });
 
-            let treeStr = "";
-            for (let i = 0; i < entries.length; i++) {
-                const entry = entries[i];
-                const isLast = i === entries.length - 1;
-                const pointer = isLast ? "└── " : "├── ";
+            const entryData = await Promise.all(entries.map(async (entry) => {
                 const fullPath = path.join(currentPath, entry.name);
-
                 if (entry.isDirectory()) {
-                    treeStats.totalDirs++;
-                    treeStr += prefix + pointer + entry.name + "/\n";
-                    const newPrefix = prefix + (isLast ? "    " : "│   ");
-                    treeStr += await traverse(fullPath, currentDepth + 1, newPrefix);
+                    return { entry, fullPath, isDir: true };
                 } else {
-                    treeStats.totalFiles++;
                     let fileSize = 0;
                     let lineCount = 0;
-
+                    const ext = path.extname(entry.name).toLowerCase() || '[no ext]';
                     try {
                         const fStat = await fs.stat(fullPath);
                         fileSize = fStat.size;
-                        treeStats.totalBytes += fileSize;
-
-                        const ext = path.extname(entry.name).toLowerCase() || '[no ext]';
-                        treeStats.extensions[ext] = (treeStats.extensions[ext] || 0) + 1;
-
-                        const isBinary = ['.png', '.jpg', '.jpeg', '.gif', '.ico', '.pdf', '.zip', '.exe', '.tar', '.gz'].includes(ext);
-                        if (!isBinary && fileSize < 2 * 1024 * 1024) {
+                        
+                        if (CODE_EXTENSIONS.has(ext) && fileSize < 500 * 1024) {
                             const content = await fs.readFile(fullPath, 'utf-8');
-                            lineCount = content.split('\n').length;
-                            treeStats.totalLines += lineCount;
+                            let count = 1;
+                            for (let k = 0; k < content.length; k++) {
+                                if (content[k] === '\n') count++;
+                            }
+                            lineCount = count;
                         }
                     } catch (e) {}
+                    return { entry, fullPath, isDir: false, fileSize, lineCount, ext };
+                }
+            }));
 
-                    treeStr += prefix + pointer + entry.name + (lineCount > 0 ? ` (${lineCount} lines)` : "") + "\n";
+            let treeStr = "";
+            for (let i = 0; i < entryData.length; i++) {
+                if (totalTreeLines >= MAX_TREE_LINES) {
+                    if (!truncated) {
+                        treeStr += prefix + "└── ... [Tree output truncated due to large folder size]\n";
+                        truncated = true;
+                    }
+                    break;
+                }
+
+                const item = entryData[i];
+                const isLast = i === entryData.length - 1;
+                const pointer = isLast ? "└── " : "├── ";
+
+                if (item.isDir) {
+                    treeStats.totalDirs++;
+                    totalTreeLines++;
+                    treeStr += prefix + pointer + item.entry.name + "/\n";
+                    const newPrefix = prefix + (isLast ? "    " : "│   ");
+                    treeStr += await traverse(item.fullPath, currentDepth + 1, newPrefix);
+                } else {
+                    treeStats.totalFiles++;
+                    treeStats.totalBytes += item.fileSize;
+                    treeStats.totalLines += item.lineCount;
+                    treeStats.extensions[item.ext] = (treeStats.extensions[item.ext] || 0) + 1;
+                    totalTreeLines++;
+
+                    treeStr += prefix + pointer + item.entry.name + (item.lineCount > 0 ? ` (${item.lineCount} lines)` : "") + "\n";
                 }
             }
             return treeStr;
         }
 
         const treeOutput = await traverse(validPath, 0, "");
+        const duration = Date.now() - startTime;
         
         let summary = `[PROJECT TREE & CODE STATS]\n`;
         summary += `[PATH]: ${validPath}\n`;
-        summary += `[SUMMARY]: ${treeStats.totalFiles} files, ${treeStats.totalDirs} folders, ${treeStats.totalLines} total lines of code (${(treeStats.totalBytes / 1024).toFixed(1)} KB)\n`;
+        summary += `[SUMMARY]: ${treeStats.totalFiles} files, ${treeStats.totalDirs} folders, ${treeStats.totalLines} total lines of code (${(treeStats.totalBytes / 1024).toFixed(1)} KB) - computed in ${duration}ms\n`;
         summary += `[FILE BREAKDOWN]: ${Object.entries(treeStats.extensions).map(([ext, count]) => `${ext}: ${count}`).join(', ')}\n\n`;
         summary += `[DIRECTORY TREE]:\n${path.basename(validPath)}/\n${treeOutput}`;
 
