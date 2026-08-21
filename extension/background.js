@@ -58,19 +58,96 @@ function doExecuteTool(toolName, args, sendResponse) {
     });
 }
 
+function fetchTools(sendResponse) {
+    fetch('http://localhost:8889/tools')
+        .then(res => res.json())
+        .then(data => {
+            if (sendResponse) sendResponse({ success: true, data });
+        })
+        .catch(err => {
+            if (sendResponse) sendResponse({ success: false, error: err.message });
+        });
+}
+
+function saveAuditLog(logEntry) {
+    if (!chrome.storage || !chrome.storage.local) return;
+    chrome.storage.local.get(['mcp_audit_logs'], (result) => {
+        const logs = result.mcp_audit_logs || [];
+        logs.unshift(logEntry);
+        if (logs.length > 50) logs.pop();
+        chrome.storage.local.set({ mcp_audit_logs: logs });
+    });
+}
+
+function fetchConfig(sendResponse) {
+    fetch('http://localhost:8889/config')
+        .then(res => res.json())
+        .then(data => {
+            if (sendResponse) sendResponse({ success: true, data });
+        })
+        .catch(err => {
+            if (sendResponse) sendResponse({ success: false, error: err.message });
+        });
+}
+
+function updateConfig(allowedDirectories, sendResponse) {
+    fetch('http://localhost:8889/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allowedDirectories })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (sendResponse) sendResponse({ success: true, data });
+    })
+    .catch(err => {
+        if (sendResponse) sendResponse({ success: false, error: err.message });
+    });
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.type === 'CONNECT') {
+    if (request.type === 'CONNECT' || request.type === 'CHECK_STATUS') {
         checkHealth(sendResponse);
         return true;
     }
     
-    if (request.type === 'CHECK_STATUS') {
-        checkHealth(sendResponse);
+    if (request.type === 'GET_TOOLS') {
+        fetchTools(sendResponse);
+        return true;
+    }
+
+    if (request.type === 'GET_CONFIG') {
+        fetchConfig(sendResponse);
+        return true;
+    }
+
+    if (request.type === 'SET_CONFIG') {
+        updateConfig(request.allowedDirectories, sendResponse);
         return true;
     }
     
     if (request.type === 'EXECUTE_TOOL') {
         executeTool(request.tool, request.args, sendResponse);
+        return true;
+    }
+
+    if (request.type === 'ADD_AUDIT_LOG') {
+        saveAuditLog(request.log);
+        if (sendResponse) sendResponse({ success: true });
+        return true;
+    }
+    
+    if (request.type === 'GET_AUDIT_LOGS') {
+        chrome.storage.local.get(['mcp_audit_logs'], (result) => {
+            sendResponse({ success: true, logs: result.mcp_audit_logs || [] });
+        });
+        return true;
+    }
+
+    if (request.type === 'CLEAR_AUDIT_LOGS') {
+        chrome.storage.local.set({ mcp_audit_logs: [] }, () => {
+            sendResponse({ success: true });
+        });
         return true;
     }
 });

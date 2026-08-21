@@ -5,7 +5,8 @@
   "description": "Connects ChatGPT Web to your local filesystem using Model Context Protocol",
   "permissions": [
     "activeTab",
-    "scripting"
+    "scripting",
+    "storage"
   ],
   "host_permissions": [
     "https://chatgpt.com/*",

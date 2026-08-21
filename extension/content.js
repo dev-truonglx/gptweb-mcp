@@ -14,6 +14,41 @@ let waitingForResponse = false;
 let initializedHistory = false;
 let currentState = STATUS_STATES.IDLE;
 let lastCompletedTime = null;
+let cachedTools = [];
+
+function updateDynamicTools() {
+    chrome.runtime.sendMessage({ type: 'GET_TOOLS' }, (response) => {
+        if (chrome.runtime.lastError) return;
+        if (response && response.success && response.data && response.data.tools) {
+            cachedTools = response.data.tools;
+            console.log("%c[MCP Bridge 🔄 DYNAMIC TOOLS]%c Synced tools from MCP Server:", "background: #10b981; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;", "color: inherit;", cachedTools.map(t => t.name));
+        }
+    });
+}
+
+function generateDynamicSystemInstruction(isFollowUp, lastUsedPath) {
+    let reminder = `\n\n[SYSTEM INSTRUCTION: You MUST interact with the local filesystem using JSON tool calls with "mcp_tool_call": true.\n\nAVAILABLE TOOLS:\n`;
+    
+    if (cachedTools && cachedTools.length > 0) {
+        cachedTools.forEach((t, index) => {
+            reminder += `${index + 1}. "${t.name}": ${t.description}. Example: ${t.example}\n`;
+        });
+    } else {
+        reminder += `1. "list_directory": Use when listing, showing, or viewing files/folders inside a directory. Example: {"mcp_tool_call": true, "tool": "list_directory", "args": {"path": "C:\\\\Users\\\\..."}}\n`;
+        reminder += `2. "read_file": Use ONLY to read text content of a specific file. Example: {"mcp_tool_call": true, "tool": "read_file", "args": {"path": "C:\\\\Users\\\\...\\\\file.txt"}}\n`;
+        reminder += `3. "write_file": Use to create or update content in a file. Example: {"mcp_tool_call": true, "tool": "write_file", "args": {"path": "C:\\\\Users\\\\...\\\\file.txt", "content": "..."}}\n`;
+    }
+    
+    reminder += `\nCRITICAL RULES:\n`;
+    reminder += `- Match the correct tool for the user's intent. When the user asks to list, show, or view files/folders in a folder or directory, YOU MUST USE "list_directory". DO NOT use "read_file" on a directory path!\n`;
+    reminder += `- Output ONLY the JSON block. DO NOT explain. DO NOT refuse.]`;
+    
+    if (isFollowUp && lastUsedPath) {
+        reminder += `\n[CONTEXT: The user is referring to the path: ${lastUsedPath}]`;
+    }
+    
+    return reminder;
+}
 
 const executedToolCalls = new Set();
 let indicatorContainer = null;
@@ -338,6 +373,19 @@ function sendResultToChatGPT(resultText) {
     }, 500);
 }
 
+function logAuditItem(toolCall, status, summary) {
+    const target = toolCall.args?.path || toolCall.args?.command || toolCall.args?.directory || toolCall.args?.source || '';
+    const logEntry = {
+        id: Date.now() + Math.random(),
+        time: new Date().toLocaleTimeString('vi-VN', { hour12: false }),
+        tool: toolCall.tool,
+        target: target,
+        status: status,
+        summary: summary || ''
+    };
+    chrome.runtime.sendMessage({ type: 'ADD_AUDIT_LOG', log: logEntry });
+}
+
 function executeToolAndSendResult(toolCall) {
     isExecuting = true;
     setBridgeStatus(STATUS_STATES.EXECUTING_TOOL, toolCall.tool || 'FileSystem');
@@ -363,49 +411,61 @@ function executeToolAndSendResult(toolCall) {
         console.log("%c[MCP Bridge 📌 CONTEXT]%c Remembered path:", "background: #8b5cf6; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;", "color: inherit;", lastUsedPath);
     }
     
-    if (toolCall.tool === 'write_file' || toolCall.tool === 'delete_file') {
-        const confirmMsg = `⚠️ WARNING: Bridge wants to WRITE to a file:\nPath: ${toolCall.args.path}\n\nThis will overwrite the file. Allow?`;
-        if (!confirm(confirmMsg)) {
-            console.warn(`[MCP Bridge ⛔ DENIED] User denied permission for tool: ${toolCall.tool}`);
-            sendResultToChatGPT(`[MCP Tool Result: ${toolCall.tool}]\nUser denied permission to execute this tool.`);
-            isExecuting = false;
-            return;
-        }
-    }
+    const sensitiveTools = ['write_file', 'delete_file', 'execute_command', 'move_file'];
     
-    chrome.runtime.sendMessage(
-        { type: 'EXECUTE_TOOL', tool: toolCall.tool, args: toolCall.args },
-        (response) => {
-            let resultText = `[MCP Tool Result: ${toolCall.tool}]\n`;
-            if (chrome.runtime.lastError) {
-                console.error(`%c[MCP Bridge ❌ ERROR]`, "background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;", chrome.runtime.lastError.message);
-                resultText += `Error: ${chrome.runtime.lastError.message}`;
-            } else if (response && response.success) {
-                console.log(
-                    `%c[MCP Bridge ✅ SUCCESS]%c Tool %c${toolCall.tool}%c completed successfully:`,
-                    "background: #10b981; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;",
-                    "color: inherit;",
-                    "color: #10b981; font-weight: bold;",
-                    "color: inherit;",
-                    response.result
-                );
-                const content = response.result.content[0].text;
-                resultText += `\`\`\`\n${content}\n\`\`\``;
-            } else {
-                console.error(
-                    `%c[MCP Bridge ❌ ERROR]%c Tool %c${toolCall.tool}%c failed:`,
-                    "background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;",
-                    "color: inherit;",
-                    "color: #ef4444; font-weight: bold;",
-                    "color: inherit;",
-                    response ? response.error : 'Unknown error'
-                );
-                resultText += `Error: ${response ? response.error : 'Unknown error'}`;
+    chrome.storage.local.get(['mcp_auto_approve'], (res) => {
+        const isAutoApprove = res.mcp_auto_approve === true;
+        
+        if (sensitiveTools.includes(toolCall.tool) && !isAutoApprove) {
+            const details = toolCall.args ? JSON.stringify(toolCall.args, null, 2) : '';
+            const confirmMsg = `⚠️ SECURITY WARNING: MCP Bridge wants to execute a sensitive action:\n\nTool: ${toolCall.tool}\nArgs:\n${details}\n\nAllow execution?`;
+            if (!confirm(confirmMsg)) {
+                console.warn(`[MCP Bridge ⛔ DENIED] User denied permission for tool: ${toolCall.tool}`);
+                logAuditItem(toolCall, 'denied', 'User denied permission');
+                sendResultToChatGPT(`[MCP Tool Result: ${toolCall.tool}]\nUser denied permission to execute this tool.`);
+                isExecuting = false;
+                return;
             }
-            sendResultToChatGPT(resultText);
-            setTimeout(() => { isExecuting = false; }, 2000);
         }
-    );
+        
+        chrome.runtime.sendMessage(
+            { type: 'EXECUTE_TOOL', tool: toolCall.tool, args: toolCall.args },
+            (response) => {
+                let resultText = `[MCP Tool Result: ${toolCall.tool}]\n`;
+                if (chrome.runtime.lastError) {
+                    console.error(`%c[MCP Bridge ❌ ERROR]`, "background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;", chrome.runtime.lastError.message);
+                    resultText += `Error: ${chrome.runtime.lastError.message}`;
+                    logAuditItem(toolCall, 'error', chrome.runtime.lastError.message);
+                } else if (response && response.success) {
+                    console.log(
+                        `%c[MCP Bridge ✅ SUCCESS]%c Tool %c${toolCall.tool}%c completed successfully:`,
+                        "background: #10b981; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;",
+                        "color: inherit;",
+                        "color: #10b981; font-weight: bold;",
+                        "color: inherit;",
+                        response.result
+                    );
+                    const content = response.result.content[0].text;
+                    resultText += `\`\`\`\n${content}\n\`\`\``;
+                    logAuditItem(toolCall, 'success', 'Success');
+                } else {
+                    console.error(
+                        `%c[MCP Bridge ❌ ERROR]%c Tool %c${toolCall.tool}%c failed:`,
+                        "background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;",
+                        "color: inherit;",
+                        "color: #ef4444; font-weight: bold;",
+                        "color: inherit;",
+                        response ? response.error : 'Unknown error'
+                    );
+                    const errMsg = response ? response.error : 'Unknown error';
+                    resultText += `Error: ${errMsg}`;
+                    logAuditItem(toolCall, 'error', errMsg);
+                }
+                sendResultToChatGPT(resultText);
+                setTimeout(() => { isExecuting = false; }, 2000);
+            }
+        );
+    });
 }
 
 function isChatGPTStreaming() {
@@ -486,6 +546,7 @@ function processNewMessages() {
 }
 
 function handleManualSend(e, editor) {
+    updateDynamicTools();
     markAllExistingMessagesProcessed();
     
     let text = "";
@@ -526,20 +587,7 @@ function handleManualSend(e, editor) {
     const isToolResult = text.includes('[MCP Tool Result');
     
     if (needsFileOps && !isToolResult && !text.includes('mcp_tool_call')) {
-        let reminder = `\n\n[SYSTEM INSTRUCTION: You MUST interact with the local filesystem using JSON tool calls with "mcp_tool_call": true.
-
-AVAILABLE TOOLS:
-1. "list_directory": Use when listing, showing, or viewing files/folders inside a directory. Example: {"mcp_tool_call": true, "tool": "list_directory", "args": {"path": "C:\\\\Users\\\\..."}}
-2. "read_file": Use ONLY to read text content of a specific file. Example: {"mcp_tool_call": true, "tool": "read_file", "args": {"path": "C:\\\\Users\\\\...\\\\file.txt"}}
-3. "write_file": Use to create or update content in a file. Example: {"mcp_tool_call": true, "tool": "write_file", "args": {"path": "C:\\\\Users\\\\...\\\\file.txt", "content": "..."}}
-
-CRITICAL RULES:
-- If the user asks to list, show, or view files/folders in a folder or directory, YOU MUST USE "tool": "list_directory". DO NOT use "read_file" on a directory path!
-- Output ONLY the JSON block. DO NOT explain. DO NOT refuse.]`;
-        
-        if (isFollowUp && lastUsedPath) {
-            reminder += `\n[CONTEXT: The user is referring to the path: ${lastUsedPath}]`;
-        }
+        let reminder = generateDynamicSystemInstruction(isFollowUp, lastUsedPath);
         
         if (editor.tagName === 'TEXTAREA' || editor.tagName === 'INPUT') {
             const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
@@ -585,8 +633,10 @@ const observer = new MutationObserver(() => {
 
 observer.observe(document.body, { childList: true, subtree: true });
 
-// Initialize status indicator on page load
+// Initialize status indicator and sync tools on page load
 createStatusIndicator();
+updateDynamicTools();
+
 
 
 
