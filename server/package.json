@@ -1,0 +1,15 @@
+{
+  "name": "chatgpt-mcp-local-server",
+  "version": "1.0.0",
+  "description": "Local MCP Server to connect ChatGPT Web with local folder",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.1",
+    "express": "^4.21.2",
+    "cors": "^2.8.5"
+  }
+}
