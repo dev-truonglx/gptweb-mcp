@@ -41,7 +41,7 @@ const tools = {
     list_directory: async (args) => {
         const { path: validPath, stats } = await validateExistingPath(args.path);
         if (!stats.isDirectory()) {
-            return { content: [{ type: "text", text: `Error: ${validPath} is a file, not a directory.` }] };
+            return { content: [{ type: "text", text: `Error: ${validPath} is a file, not a directory. To read file content, call tool "read_file" with {"path": "${validPath}"}.` }] };
         }
         const entries = await fs.readdir(validPath, { withFileTypes: true });
         const list = entries.map(entry => `${entry.isDirectory() ? '[DIR]' : '[FILE]'} ${entry.name}`).join('\n');
@@ -50,7 +50,7 @@ const tools = {
     read_file: async (args) => {
         const { path: validPath, stats } = await validateExistingPath(args.path);
         if (!stats.isFile()) {
-            return { content: [{ type: "text", text: `Error: ${validPath} is a directory, not a file.` }] };
+            return { content: [{ type: "text", text: `Error: ${validPath} is a directory, not a file. To list files and subfolders in this directory, call tool "list_directory" with {"path": "${validPath}"}.` }] };
         }
         const content = await fs.readFile(validPath, "utf-8");
         return { content: [{ type: "text", text: content }] };

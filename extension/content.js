@@ -180,7 +180,18 @@ function cleanAndFixJson(clean) {
         if (obj && obj.mcp_tool_call === true) return obj;
     } catch (e2) {}
 
-    // 3. Fallback extraction for malformed LLM JSON payloads containing unescaped HTML/code quotes
+    // 3. Fix unescaped single backslashes in Windows paths (e.g. C:\Users\... -> C:\\Users\\...)
+    try {
+        const fixedWinSlash = clean.replace(/([a-zA-Z]:\\[^"]+)/g, (m) => {
+            return m.replace(/\\/g, '\\\\');
+        }).replace(/("(?:[^"\\]|\\.)*")/g, (m) => {
+            return m.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
+        });
+        const obj = JSON.parse(fixedWinSlash);
+        if (obj && obj.mcp_tool_call === true) return obj;
+    } catch (e3) {}
+
+    // 4. Fallback extraction for malformed LLM JSON payloads containing unescaped HTML/code quotes
     if (clean.includes('"mcp_tool_call"') || clean.includes('mcp_tool_call')) {
         try {
             const toolMatch = clean.match(/"tool"\s*:\s*"([^"]+)"/);
@@ -501,21 +512,33 @@ function handleManualSend(e, editor) {
     const lowerText = text.toLowerCase();
     const isFollowUp = lowerText.includes('file đấy') || lowerText.includes('file đó') || 
                        lowerText.includes('tiếp tục sửa') || lowerText.includes('file này') ||
+                       lowerText.includes('thư mục đó') || lowerText.includes('folder đó') ||
                        lowerText.includes('sửa file');
                        
     const needsFileOps = lowerText.includes('file') || lowerText.includes('folder') || 
                           lowerText.includes('directory') || lowerText.includes('path') ||
+                          lowerText.includes('thư mục') || lowerText.includes('danh sách') ||
+                          lowerText.includes('liệt kê') || lowerText.includes('xem') ||
                           lowerText.includes('đọc') || lowerText.includes('ghi') || 
-                          lowerText.includes('sửa') || lowerText.includes('liệt kê') ||
+                          lowerText.includes('sửa') || lowerText.includes('tạo') ||
                           isFollowUp;
                           
     const isToolResult = text.includes('[MCP Tool Result');
     
     if (needsFileOps && !isToolResult && !text.includes('mcp_tool_call')) {
-        let reminder = `\n\n[SYSTEM INSTRUCTION: You MUST read or write files using JSON. Output ONLY a JSON block like {"mcp_tool_call": true, "tool": "read_file", "args": {"path": "..."}} or {"mcp_tool_call": true, "tool": "write_file", "args": {"path": "...", "content": "..."}}. DO NOT explain. DO NOT refuse.]`;
+        let reminder = `\n\n[SYSTEM INSTRUCTION: You MUST interact with the local filesystem using JSON tool calls with "mcp_tool_call": true.
+
+AVAILABLE TOOLS:
+1. "list_directory": Use when listing, showing, or viewing files/folders inside a directory. Example: {"mcp_tool_call": true, "tool": "list_directory", "args": {"path": "C:\\\\Users\\\\..."}}
+2. "read_file": Use ONLY to read text content of a specific file. Example: {"mcp_tool_call": true, "tool": "read_file", "args": {"path": "C:\\\\Users\\\\...\\\\file.txt"}}
+3. "write_file": Use to create or update content in a file. Example: {"mcp_tool_call": true, "tool": "write_file", "args": {"path": "C:\\\\Users\\\\...\\\\file.txt", "content": "..."}}
+
+CRITICAL RULES:
+- If the user asks to list, show, or view files/folders in a folder or directory, YOU MUST USE "tool": "list_directory". DO NOT use "read_file" on a directory path!
+- Output ONLY the JSON block. DO NOT explain. DO NOT refuse.]`;
         
         if (isFollowUp && lastUsedPath) {
-            reminder += `\n[CONTEXT: The user is referring to the file: ${lastUsedPath}]`;
+            reminder += `\n[CONTEXT: The user is referring to the path: ${lastUsedPath}]`;
         }
         
         if (editor.tagName === 'TEXTAREA' || editor.tagName === 'INPUT') {
