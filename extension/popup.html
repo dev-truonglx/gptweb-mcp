@@ -6,7 +6,7 @@
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            width: 360px;
+            width: 380px;
             padding: 16px;
             font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             background: #0f172a;
@@ -146,6 +146,88 @@
             transform: translateX(20px);
         }
 
+        /* Code Diff Viewer Styles */
+        .diff-select-row {
+            margin-bottom: 8px;
+        }
+
+        .diff-viewer-box {
+            background: #090d16;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            overflow: hidden;
+            font-family: monospace;
+            font-size: 11px;
+            margin-top: 4px;
+        }
+
+        .diff-header-info {
+            background: rgba(30, 41, 59, 0.8);
+            padding: 6px 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .diff-path {
+            color: #38bdf8;
+            word-break: break-all;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        .diff-stats {
+            font-weight: 700;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: rgba(15, 23, 42, 0.6);
+            color: #34d399;
+        }
+
+        .diff-lines-container {
+            max-height: 170px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .diff-line {
+            display: flex;
+            padding: 2px 8px;
+            line-height: 1.4;
+        }
+
+        .diff-line-num {
+            width: 32px;
+            color: #64748b;
+            user-select: none;
+            flex-shrink: 0;
+            text-align: right;
+            padding-right: 8px;
+        }
+
+        .diff-line-text {
+            flex: 1;
+        }
+
+        .diff-line-add {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+        }
+
+        .diff-line-del {
+            background: rgba(244, 63, 94, 0.15);
+            color: #f87171;
+        }
+
+        .diff-line-normal {
+            color: #cbd5e1;
+        }
+
         /* Presets Section */
         .preset-select-row {
             display: flex;
@@ -229,7 +311,7 @@
 
         /* Allowed Directories Styles */
         .dir-list {
-            max-height: 110px;
+            max-height: 100px;
             overflow-y: auto;
             display: flex;
             flex-direction: column;
@@ -343,7 +425,7 @@
         }
 
         .log-list {
-            max-height: 130px;
+            max-height: 120px;
             overflow-y: auto;
             display: flex;
             flex-direction: column;
@@ -417,7 +499,7 @@
         .empty-log {
             text-align: center;
             color: #64748b;
-            padding: 14px 0;
+            padding: 12px 0;
             font-size: 11px;
         }
 
@@ -473,6 +555,33 @@
                 <span class="slider"></span>
             </label>
         </div>
+    </div>
+
+    <!-- Code Diff Viewer Card -->
+    <div class="card">
+        <div class="log-header">
+            <span class="log-title">
+                📝 Visual Code Diff Viewer
+            </span>
+            <button id="clearDiffsBtn" class="clear-btn">Xóa Diff</button>
+        </div>
+
+        <div class="diff-select-row">
+            <select id="diffSelect" class="preset-dropdown">
+                <option value="">-- Chọn file vừa sửa để xem Diff --</option>
+            </select>
+        </div>
+
+        <div id="diffViewerBox" class="diff-viewer-box" style="display: none;">
+            <div id="diffHeaderInfo" class="diff-header-info">
+                <span id="diffFilePathText" class="diff-path">path/to/file</span>
+                <span id="diffStatsBadge" class="diff-stats">+0 / -0</span>
+            </div>
+            <div id="diffLinesContainer" class="diff-lines-container">
+                <!-- Diff lines rendered here -->
+            </div>
+        </div>
+        <div id="emptyDiffText" class="empty-log">Chưa có thay đổi code nào gần đây</div>
     </div>
 
     <!-- Project Presets & Context Memory Card -->

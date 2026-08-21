@@ -79,6 +79,16 @@ function saveAuditLog(logEntry) {
     });
 }
 
+function saveCodeDiff(diffEntry) {
+    if (!chrome.storage || !chrome.storage.local) return;
+    chrome.storage.local.get(['mcp_code_diffs'], (result) => {
+        const diffs = result.mcp_code_diffs || [];
+        diffs.unshift(diffEntry);
+        if (diffs.length > 20) diffs.pop();
+        chrome.storage.local.set({ mcp_code_diffs: diffs });
+    });
+}
+
 function fetchConfig(sendResponse) {
     fetch('http://localhost:8889/config')
         .then(res => res.json())
@@ -170,6 +180,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     if (request.type === 'SET_ACTIVE_PRESET') {
         setActivePreset(request.id, sendResponse);
+        return true;
+    }
+
+    if (request.type === 'SAVE_DIFF') {
+        saveCodeDiff(request.diff);
+        if (sendResponse) sendResponse({ success: true });
+        return true;
+    }
+    
+    if (request.type === 'GET_DIFFS') {
+        chrome.storage.local.get(['mcp_code_diffs'], (result) => {
+            sendResponse({ success: true, diffs: result.mcp_code_diffs || [] });
+        });
+        return true;
+    }
+
+    if (request.type === 'CLEAR_DIFFS') {
+        chrome.storage.local.set({ mcp_code_diffs: [] }, () => {
+            sendResponse({ success: true });
+        });
         return true;
     }
     

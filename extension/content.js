@@ -15,6 +15,7 @@ let initializedHistory = false;
 let currentState = STATUS_STATES.IDLE;
 let lastCompletedTime = null;
 let cachedTools = [];
+let cachedActivePreset = null;
 
 function isExtensionValid() {
     return typeof chrome !== 'undefined' && chrome.runtime && !!chrome.runtime.id;
@@ -44,7 +45,18 @@ function safeSendMessage(message, callback) {
     }
 }
 
+function updateActivePresetCache() {
+    safeSendMessage({ type: 'GET_PRESETS' }, (res) => {
+        if (res && res.success) {
+            const presets = res.presets || [];
+            const activeId = res.activePresetId;
+            cachedActivePreset = activeId ? (presets.find(p => p.id === activeId) || null) : null;
+        }
+    });
+}
+
 function updateDynamicTools() {
+    updateActivePresetCache();
     safeSendMessage({ type: 'GET_TOOLS' }, (response) => {
         if (response && response.success && response.data && response.data.tools) {
             cachedTools = response.data.tools;
@@ -509,6 +521,26 @@ function executeToolAndSendResult(toolCall) {
                                 renderImagePreviewInChat(dataUrlMatch[1], pathMatch ? pathMatch[1] : toolCall.args?.path);
                             }
                         }
+
+                        if (content.includes('[DIFF_DATA]:')) {
+                            const diffMatch = content.match(/\[DIFF_DATA\]:\s*(\{[\s\S]+\})/);
+                            if (diffMatch && diffMatch[1]) {
+                                try {
+                                    const diffData = JSON.parse(diffMatch[1]);
+                                    const diffEntry = {
+                                        id: 'diff_' + Date.now(),
+                                        time: new Date().toLocaleTimeString('vi-VN', { hour12: false }),
+                                        path: diffData.path,
+                                        addedLines: diffData.addedLines,
+                                        deletedLines: diffData.deletedLines,
+                                        diffLines: diffData.diffLines
+                                    };
+                                    safeSendMessage({ type: 'SAVE_DIFF', diff: diffEntry });
+                                } catch (e) {
+                                    console.error("[MCP Bridge] Error parsing diff data:", e);
+                                }
+                            }
+                        }
                     }
                     sendResultToChatGPT(resultText);
                     setTimeout(() => { isExecuting = false; }, 2000);
@@ -687,33 +719,29 @@ function handleManualSend(e, editor) {
                           lowerText.includes('search') || lowerText.includes('google') ||
                           lowerText.includes('tìm kiếm') || lowerText.includes('truy cập web') ||
                           lowerText.includes('tra cứu') || lowerText.includes('tìm trên web') ||
-                          lowerText.includes('kết quả') ||
+                          lowerText.includes('kết quả') || lowerText.includes('sơ đồ') ||
+                          lowerText.includes('cây thư mục') || lowerText.includes('cấu trúc') ||
+                          lowerText.includes('tree') || lowerText.includes('thống kê') ||
                           isFollowUp;
                           
     const isToolResult = text.includes('[MCP Tool Result');
     
     if (needsFileOps && !isToolResult && !text.includes('mcp_tool_call')) {
-        chrome.storage.local.get(['mcp_presets', 'mcp_active_preset_id'], (res) => {
-            const presets = res ? (res.mcp_presets || []) : [];
-            const activeId = res ? res.mcp_active_preset_id : null;
-            const activePreset = activeId ? presets.find(p => p.id === activeId) : null;
-            
-            let reminder = generateDynamicSystemInstruction(isFollowUp, lastUsedPath, activePreset);
-            
-            if (editor.tagName === 'TEXTAREA' || editor.tagName === 'INPUT') {
-                const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-                if (nativeInputValueSetter) {
-                    nativeInputValueSetter.call(editor, reminder + '\n\n' + text);
-                } else {
-                    editor.value = reminder + '\n\n' + text;
-                }
-                editor.dispatchEvent(new Event('input', { bubbles: true }));
+        let reminder = generateDynamicSystemInstruction(isFollowUp, lastUsedPath, cachedActivePreset);
+        
+        if (editor.tagName === 'TEXTAREA' || editor.tagName === 'INPUT') {
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+            if (nativeInputValueSetter) {
+                nativeInputValueSetter.call(editor, reminder + '\n\n' + text);
             } else {
-                editor.focus();
-                document.execCommand('selectAll', false, null);
-                document.execCommand('insertText', false, reminder + '\n\n' + text);
+                editor.value = reminder + '\n\n' + text;
             }
-        });
+            editor.dispatchEvent(new Event('input', { bubbles: true }));
+        } else {
+            editor.focus();
+            document.execCommand('selectAll', false, null);
+            document.execCommand('insertText', false, reminder + '\n\n' + text);
+        }
     }
 }
 

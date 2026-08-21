@@ -72,8 +72,31 @@ const tools = {
         const validPath = await validatePath(args.path);
         const dir = path.dirname(validPath);
         await fs.mkdir(dir, { recursive: true });
+        
+        let oldContent = "";
+        try {
+            oldContent = await fs.readFile(validPath, "utf-8");
+        } catch (e) {
+            oldContent = "";
+        }
+        
+        const diff = generateLineDiff(oldContent, args.content);
+        const addedCount = diff.filter(d => d.type === 'add').length;
+        const delCount = diff.filter(d => d.type === 'del').length;
+        
         await fs.writeFile(validPath, args.content, "utf-8");
-        return { content: [{ type: "text", text: `Successfully wrote to ${validPath}` }] };
+        
+        const diffData = {
+            path: validPath,
+            addedLines: addedCount,
+            deletedLines: delCount,
+            diffLines: diff.slice(0, 500)
+        };
+        
+        let output = `Successfully wrote to ${validPath} (+${addedCount} / -${delCount} lines)\n`;
+        output += `[DIFF_DATA]: ${JSON.stringify(diffData)}`;
+        
+        return { content: [{ type: "text", text: output }] };
     },
     execute_command: async (args) => {
         const targetCwd = args.cwd ? await validatePath(args.cwd) : process.cwd();
@@ -257,8 +280,145 @@ const tools = {
         output += `[FULL_DATA_URL]: ${dataUrl}`;
         
         return { content: [{ type: "text", text: output }] };
+    },
+    get_project_tree: async (args) => {
+        const { path: validPath, stats } = await validateExistingPath(args.path);
+        if (!stats.isDirectory()) {
+            throw new Error(`Path is not a directory: ${validPath}`);
+        }
+        
+        const depth = args.depth ? parseInt(args.depth, 10) : 4;
+        const ignoreList = ['node_modules', '.git', 'dist', '.next', 'build', '.DS_Store'];
+        
+        const treeStats = {
+            totalFiles: 0,
+            totalDirs: 0,
+            totalBytes: 0,
+            totalLines: 0,
+            extensions: {}
+        };
+
+        async function traverse(currentPath, currentDepth, prefix = "") {
+            if (currentDepth > depth) return "";
+            
+            let entries = [];
+            try {
+                entries = await fs.readdir(currentPath, { withFileTypes: true });
+            } catch (err) {
+                return prefix + "└── [Error reading directory]\n";
+            }
+
+            entries = entries.filter(e => !ignoreList.includes(e.name));
+            
+            entries.sort((a, b) => {
+                if (a.isDirectory() && !b.isDirectory()) return -1;
+                if (!a.isDirectory() && b.isDirectory()) return 1;
+                return a.name.localeCompare(b.name);
+            });
+
+            let treeStr = "";
+            for (let i = 0; i < entries.length; i++) {
+                const entry = entries[i];
+                const isLast = i === entries.length - 1;
+                const pointer = isLast ? "└── " : "├── ";
+                const fullPath = path.join(currentPath, entry.name);
+
+                if (entry.isDirectory()) {
+                    treeStats.totalDirs++;
+                    treeStr += prefix + pointer + entry.name + "/\n";
+                    const newPrefix = prefix + (isLast ? "    " : "│   ");
+                    treeStr += await traverse(fullPath, currentDepth + 1, newPrefix);
+                } else {
+                    treeStats.totalFiles++;
+                    let fileSize = 0;
+                    let lineCount = 0;
+
+                    try {
+                        const fStat = await fs.stat(fullPath);
+                        fileSize = fStat.size;
+                        treeStats.totalBytes += fileSize;
+
+                        const ext = path.extname(entry.name).toLowerCase() || '[no ext]';
+                        treeStats.extensions[ext] = (treeStats.extensions[ext] || 0) + 1;
+
+                        const isBinary = ['.png', '.jpg', '.jpeg', '.gif', '.ico', '.pdf', '.zip', '.exe', '.tar', '.gz'].includes(ext);
+                        if (!isBinary && fileSize < 2 * 1024 * 1024) {
+                            const content = await fs.readFile(fullPath, 'utf-8');
+                            lineCount = content.split('\n').length;
+                            treeStats.totalLines += lineCount;
+                        }
+                    } catch (e) {}
+
+                    treeStr += prefix + pointer + entry.name + (lineCount > 0 ? ` (${lineCount} lines)` : "") + "\n";
+                }
+            }
+            return treeStr;
+        }
+
+        const treeOutput = await traverse(validPath, 0, "");
+        
+        let summary = `[PROJECT TREE & CODE STATS]\n`;
+        summary += `[PATH]: ${validPath}\n`;
+        summary += `[SUMMARY]: ${treeStats.totalFiles} files, ${treeStats.totalDirs} folders, ${treeStats.totalLines} total lines of code (${(treeStats.totalBytes / 1024).toFixed(1)} KB)\n`;
+        summary += `[FILE BREAKDOWN]: ${Object.entries(treeStats.extensions).map(([ext, count]) => `${ext}: ${count}`).join(', ')}\n\n`;
+        summary += `[DIRECTORY TREE]:\n${path.basename(validPath)}/\n${treeOutput}`;
+
+        return { content: [{ type: "text", text: summary.trim() }] };
     }
 };
+
+function generateLineDiff(oldText, newText) {
+    const oldLines = (oldText || "").split('\n');
+    const newLines = (newText || "").split('\n');
+    
+    const diff = [];
+    let i = 0, j = 0;
+    
+    while (i < oldLines.length || j < newLines.length) {
+        if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
+            diff.push({ type: 'normal', oldNum: i + 1, newNum: j + 1, text: oldLines[i] });
+            i++;
+            j++;
+        } else {
+            let foundOld = -1;
+            let foundNew = -1;
+            
+            for (let look = 1; look < 10; look++) {
+                if (i + look < oldLines.length && j < newLines.length && oldLines[i + look] === newLines[j]) {
+                    foundOld = i + look;
+                    break;
+                }
+                if (j + look < newLines.length && i < oldLines.length && newLines[j + look] === oldLines[i]) {
+                    foundNew = j + look;
+                    break;
+                }
+            }
+            
+            if (foundOld !== -1) {
+                while (i < foundOld) {
+                    diff.push({ type: 'del', oldNum: i + 1, newNum: null, text: oldLines[i] });
+                    i++;
+                }
+            } else if (foundNew !== -1) {
+                while (j < foundNew) {
+                    diff.push({ type: 'add', oldNum: null, newNum: j + 1, text: newLines[j] });
+                    j++;
+                }
+            } else {
+                if (i < oldLines.length) {
+                    diff.push({ type: 'del', oldNum: i + 1, newNum: null, text: oldLines[i] });
+                    i++;
+                }
+                if (j < newLines.length) {
+                    diff.push({ type: 'add', oldNum: null, newNum: j + 1, text: newLines[j] });
+                    j++;
+                }
+            }
+        }
+    }
+    
+    return diff;
+}
 
 function htmlToText(html) {
     if (!html) return "";
@@ -481,6 +641,13 @@ app.get("/tools", (req, res) => {
                 description: "Read a local image file (.png, .jpg, .jpeg, .gif, .webp, .svg) and return Base64 Data URL for preview and visual inspection",
                 parameters: { path: "Path to image file" },
                 example: '{"mcp_tool_call": true, "tool": "read_image", "args": {"path": "C:\\\\path\\\\to\\\\image.png"}}'
+            },
+            {
+                name: "get_project_tree",
+                sensitive: false,
+                description: "Generate a clean ASCII directory tree and project code statistics (file count, total LOC lines of code, file types breakdown)",
+                parameters: { path: "Path to project directory", depth: "Optional max depth (default 4)" },
+                example: '{"mcp_tool_call": true, "tool": "get_project_tree", "args": {"path": "C:\\\\path\\\\to\\\\project"}}'
             }
         ]
     });
