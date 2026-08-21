@@ -105,9 +105,71 @@ function updateConfig(allowedDirectories, sendResponse) {
     });
 }
 
+function getPresets(sendResponse) {
+    chrome.storage.local.get(['mcp_presets', 'mcp_active_preset_id'], (res) => {
+        sendResponse({
+            success: true,
+            presets: res.mcp_presets || [],
+            activePresetId: res.mcp_active_preset_id || null
+        });
+    });
+}
+
+function savePreset(preset, sendResponse) {
+    chrome.storage.local.get(['mcp_presets'], (res) => {
+        let presets = res.mcp_presets || [];
+        const existingIdx = presets.findIndex(p => p.id === preset.id);
+        if (existingIdx >= 0) {
+            presets[existingIdx] = preset;
+        } else {
+            presets.push(preset);
+        }
+        chrome.storage.local.set({ mcp_presets: presets }, () => {
+            if (sendResponse) sendResponse({ success: true, presets });
+        });
+    });
+}
+
+function deletePreset(id, sendResponse) {
+    chrome.storage.local.get(['mcp_presets', 'mcp_active_preset_id'], (res) => {
+        let presets = (res.mcp_presets || []).filter(p => p.id !== id);
+        let activeId = res.mcp_active_preset_id;
+        if (activeId === id) activeId = null;
+        chrome.storage.local.set({ mcp_presets: presets, mcp_active_preset_id: activeId }, () => {
+            if (sendResponse) sendResponse({ success: true, presets, activePresetId: activeId });
+        });
+    });
+}
+
+function setActivePreset(id, sendResponse) {
+    chrome.storage.local.set({ mcp_active_preset_id: id }, () => {
+        if (sendResponse) sendResponse({ success: true, activePresetId: id });
+    });
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.type === 'CONNECT' || request.type === 'CHECK_STATUS') {
         checkHealth(sendResponse);
+        return true;
+    }
+
+    if (request.type === 'GET_PRESETS') {
+        getPresets(sendResponse);
+        return true;
+    }
+
+    if (request.type === 'SAVE_PRESET') {
+        savePreset(request.preset, sendResponse);
+        return true;
+    }
+
+    if (request.type === 'DELETE_PRESET') {
+        deletePreset(request.id, sendResponse);
+        return true;
+    }
+
+    if (request.type === 'SET_ACTIVE_PRESET') {
+        setActivePreset(request.id, sendResponse);
         return true;
     }
     

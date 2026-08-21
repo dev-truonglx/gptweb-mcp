@@ -2,6 +2,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const serverBadge = document.getElementById('serverBadge');
     const serverStatusText = document.getElementById('serverStatusText');
     const autoApproveToggle = document.getElementById('autoApproveToggle');
+    
+    // Preset elements
+    const togglePresetFormBtn = document.getElementById('togglePresetFormBtn');
+    const presetSelect = document.getElementById('presetSelect');
+    const delPresetBtn = document.getElementById('delPresetBtn');
+    const activePresetBadge = document.getElementById('activePresetBadge');
+    const presetPathText = document.getElementById('presetPathText');
+    const presetRulesText = document.getElementById('presetRulesText');
+    const presetForm = document.getElementById('presetForm');
+    const presetNameInput = document.getElementById('presetNameInput');
+    const presetPathInput = document.getElementById('presetPathInput');
+    const presetRulesInput = document.getElementById('presetRulesInput');
+    const savePresetBtn = document.getElementById('savePresetBtn');
+    const cancelPresetBtn = document.getElementById('cancelPresetBtn');
+
+    // Dir & Log elements
     const dirList = document.getElementById('dirList');
     const newDirInput = document.getElementById('newDirInput');
     const addDirBtn = document.getElementById('addDirBtn');
@@ -10,6 +26,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const refreshBtn = document.getElementById('refreshBtn');
 
     let currentAllowedDirs = [];
+    let currentPresets = [];
+    let activePresetId = null;
 
     function escapeHtml(str) {
         if (!str) return '';
@@ -44,7 +62,96 @@ document.addEventListener('DOMContentLoaded', () => {
         chrome.storage.local.set({ mcp_auto_approve: isChecked });
     });
 
-    // 3. Allowed Workspaces Configuration
+    // 3. Render Presets
+    function renderPresets() {
+        chrome.runtime.sendMessage({ type: 'GET_PRESETS' }, (res) => {
+            if (!res || !res.success) return;
+            currentPresets = res.presets || [];
+            activePresetId = res.activePresetId || null;
+
+            presetSelect.innerHTML = '<option value="">-- Mặc định (Không dùng Preset) --</option>';
+            currentPresets.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p.id;
+                opt.innerText = p.name;
+                if (p.id === activePresetId) opt.selected = true;
+                presetSelect.appendChild(opt);
+            });
+
+            updateActivePresetBadge();
+        });
+    }
+
+    function updateActivePresetBadge() {
+        const active = currentPresets.find(p => p.id === presetSelect.value);
+        if (active) {
+            activePresetBadge.style.display = 'flex';
+            presetPathText.innerText = active.path || 'N/A';
+            presetRulesText.innerText = active.instructions || 'Không có quy tắc riêng';
+        } else {
+            activePresetBadge.style.display = 'none';
+        }
+    }
+
+    presetSelect.addEventListener('change', () => {
+        const selectedId = presetSelect.value || null;
+        chrome.runtime.sendMessage({ type: 'SET_ACTIVE_PRESET', id: selectedId }, () => {
+            updateActivePresetBadge();
+        });
+    });
+
+    togglePresetFormBtn.addEventListener('click', () => {
+        presetForm.style.display = presetForm.style.display === 'none' ? 'flex' : 'none';
+    });
+
+    cancelPresetBtn.addEventListener('click', () => {
+        presetForm.style.display = 'none';
+    });
+
+    savePresetBtn.addEventListener('click', () => {
+        const name = presetNameInput.value.trim();
+        const path = presetPathInput.value.trim();
+        const instructions = presetRulesInput.value.trim();
+
+        if (!name || !path) {
+            alert('Vui lòng nhập Tên Preset và Đường dẫn thư mục!');
+            return;
+        }
+
+        const newPreset = {
+            id: 'preset_' + Date.now(),
+            name,
+            path,
+            instructions
+        };
+
+        chrome.runtime.sendMessage({ type: 'SAVE_PRESET', preset: newPreset }, () => {
+            // Ensure path is added to allowed directories if not present
+            if (!currentAllowedDirs.includes(path)) {
+                saveAllowedDirs([...currentAllowedDirs, path]);
+            }
+            presetNameInput.value = '';
+            presetPathInput.value = '';
+            presetRulesInput.value = '';
+            presetForm.style.display = 'none';
+            renderPresets();
+        });
+    });
+
+    delPresetBtn.addEventListener('click', () => {
+        const selectedId = presetSelect.value;
+        if (!selectedId) {
+            alert('Vui lòng chọn một Preset để xóa!');
+            return;
+        }
+        if (confirm('Bạn có chắc chắn muốn xóa Preset này?')) {
+            chrome.runtime.sendMessage({ type: 'DELETE_PRESET', id: selectedId }, () => {
+                renderPresets();
+            });
+        }
+    });
+
+    // 4. Allowed Workspaces Configuration
     function renderAllowedDirs() {
         chrome.runtime.sendMessage({ type: 'GET_CONFIG' }, (response) => {
             if (chrome.runtime.lastError || !response || !response.success || !response.data) {
@@ -65,7 +172,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             `).join('');
 
-            // Attach delete button click handlers
             const delButtons = dirList.querySelectorAll('.dir-del-btn');
             delButtons.forEach(btn => {
                 btn.addEventListener('click', (e) => {
@@ -112,7 +218,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // 4. Render Audit Logs
+    // 5. Render Audit Logs
     function renderAuditLogs() {
         chrome.runtime.sendMessage({ type: 'GET_AUDIT_LOGS' }, (response) => {
             if (!response || !response.logs || response.logs.length === 0) {
@@ -123,9 +229,9 @@ document.addEventListener('DOMContentLoaded', () => {
             logList.innerHTML = response.logs.map(log => {
                 let tagClass = 'tag-default';
                 if (log.tool === 'write_file') tagClass = 'tag-write';
-                else if (log.tool === 'read_file') tagClass = 'tag-read';
+                else if (log.tool === 'read_file' || log.tool === 'read_image') tagClass = 'tag-read';
                 else if (log.tool === 'list_directory') tagClass = 'tag-list';
-                else if (log.tool === 'execute_command') tagClass = 'tag-exec';
+                else if (log.tool === 'execute_command' || log.tool === 'google_search' || log.tool === 'fetch_url') tagClass = 'tag-exec';
                 else if (log.tool === 'delete_file') tagClass = 'tag-delete';
 
                 let statusClass = 'status-success';
@@ -160,12 +266,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     refreshBtn.addEventListener('click', () => {
         checkServerStatus();
+        renderPresets();
         renderAllowedDirs();
         renderAuditLogs();
     });
 
     // Initial Load
     checkServerStatus();
+    renderPresets();
     renderAllowedDirs();
     renderAuditLogs();
 });

@@ -16,9 +16,36 @@ let currentState = STATUS_STATES.IDLE;
 let lastCompletedTime = null;
 let cachedTools = [];
 
+function isExtensionValid() {
+    return typeof chrome !== 'undefined' && chrome.runtime && !!chrome.runtime.id;
+}
+
+function safeSendMessage(message, callback) {
+    if (!isExtensionValid()) {
+        console.warn("%c[MCP Bridge 🔄 ATTENTION]%c Extension reloaded. Please refresh ChatGPT page (F5) to restore MCP Bridge connection.", "background: #f59e0b; color: black; padding: 2px 6px; border-radius: 4px; font-weight: bold;", "color: inherit;");
+        if (callback) callback({ success: false, error: "Extension context invalidated. Please refresh ChatGPT page (F5)." });
+        return;
+    }
+    try {
+        chrome.runtime.sendMessage(message, (response) => {
+            if (chrome.runtime.lastError) {
+                const errStr = chrome.runtime.lastError.message || '';
+                if (errStr.includes('invalidated') || errStr.includes('closed')) {
+                    console.warn("[MCP Bridge 🔄] Extension context invalidated. Please refresh ChatGPT page (F5).");
+                    if (callback) callback({ success: false, error: "Extension context invalidated. Please refresh ChatGPT page (F5)." });
+                    return;
+                }
+            }
+            if (callback) callback(response);
+        });
+    } catch (err) {
+        console.warn("[MCP Bridge 🔄] Extension context error:", err.message);
+        if (callback) callback({ success: false, error: err.message });
+    }
+}
+
 function updateDynamicTools() {
-    chrome.runtime.sendMessage({ type: 'GET_TOOLS' }, (response) => {
-        if (chrome.runtime.lastError) return;
+    safeSendMessage({ type: 'GET_TOOLS' }, (response) => {
         if (response && response.success && response.data && response.data.tools) {
             cachedTools = response.data.tools;
             console.log("%c[MCP Bridge 🔄 DYNAMIC TOOLS]%c Synced tools from MCP Server:", "background: #10b981; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;", "color: inherit;", cachedTools.map(t => t.name));
@@ -26,8 +53,18 @@ function updateDynamicTools() {
     });
 }
 
-function generateDynamicSystemInstruction(isFollowUp, lastUsedPath) {
-    let reminder = `\n\n[SYSTEM INSTRUCTION: You MUST interact with the local filesystem using JSON tool calls with "mcp_tool_call": true.\n\nAVAILABLE TOOLS:\n`;
+function generateDynamicSystemInstruction(isFollowUp, lastUsedPath, activePreset) {
+    let reminder = `\n\n[SYSTEM INSTRUCTION: You MUST interact with the local filesystem using JSON tool calls with "mcp_tool_call": true.\n`;
+    
+    if (activePreset) {
+        reminder += `\n[ACTIVE PROJECT PRESET: "${activePreset.name}"]\n`;
+        reminder += `[DEFAULT TARGET WORKSPACE PATH]: ${activePreset.path}\n`;
+        if (activePreset.instructions) {
+            reminder += `[PROJECT CONTEXT & RULES]: ${activePreset.instructions}\n`;
+        }
+    }
+    
+    reminder += `\nAVAILABLE TOOLS:\n`;
     
     if (cachedTools && cachedTools.length > 0) {
         cachedTools.forEach((t, index) => {
@@ -374,7 +411,7 @@ function sendResultToChatGPT(resultText) {
 }
 
 function logAuditItem(toolCall, status, summary) {
-    const target = toolCall.args?.path || toolCall.args?.command || toolCall.args?.directory || toolCall.args?.source || '';
+    const target = toolCall.args?.path || toolCall.args?.command || toolCall.args?.directory || toolCall.args?.source || toolCall.args?.url || '';
     const logEntry = {
         id: Date.now() + Math.random(),
         time: new Date().toLocaleTimeString('vi-VN', { hour12: false }),
@@ -383,10 +420,17 @@ function logAuditItem(toolCall, status, summary) {
         status: status,
         summary: summary || ''
     };
-    chrome.runtime.sendMessage({ type: 'ADD_AUDIT_LOG', log: logEntry });
+    safeSendMessage({ type: 'ADD_AUDIT_LOG', log: logEntry });
 }
 
 function executeToolAndSendResult(toolCall) {
+    if (!isExtensionValid()) {
+        console.warn("[MCP Bridge 🔄] Extension context invalidated. Please refresh ChatGPT page (F5).");
+        sendResultToChatGPT(`[MCP Tool Error]\nExtension context invalidated. Vui lòng làm mới lại trang ChatGPT (F5)!`);
+        isExecuting = false;
+        return;
+    }
+
     isExecuting = true;
     setBridgeStatus(STATUS_STATES.EXECUTING_TOOL, toolCall.tool || 'FileSystem');
     
@@ -411,61 +455,119 @@ function executeToolAndSendResult(toolCall) {
         console.log("%c[MCP Bridge 📌 CONTEXT]%c Remembered path:", "background: #8b5cf6; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;", "color: inherit;", lastUsedPath);
     }
     
-    const sensitiveTools = ['write_file', 'delete_file', 'execute_command', 'move_file'];
+    // Check if tool is marked as sensitive from Server dynamic tools schema
+    const toolMeta = cachedTools.find(t => t.name === toolCall.tool);
+    const isSensitiveTool = toolMeta ? toolMeta.sensitive === true : ['write_file', 'delete_file', 'execute_command', 'move_file', 'http_request'].includes(toolCall.tool);
     
-    chrome.storage.local.get(['mcp_auto_approve'], (res) => {
-        const isAutoApprove = res.mcp_auto_approve === true;
-        
-        if (sensitiveTools.includes(toolCall.tool) && !isAutoApprove) {
-            const details = toolCall.args ? JSON.stringify(toolCall.args, null, 2) : '';
-            const confirmMsg = `⚠️ SECURITY WARNING: MCP Bridge wants to execute a sensitive action:\n\nTool: ${toolCall.tool}\nArgs:\n${details}\n\nAllow execution?`;
-            if (!confirm(confirmMsg)) {
-                console.warn(`[MCP Bridge ⛔ DENIED] User denied permission for tool: ${toolCall.tool}`);
-                logAuditItem(toolCall, 'denied', 'User denied permission');
-                sendResultToChatGPT(`[MCP Tool Result: ${toolCall.tool}]\nUser denied permission to execute this tool.`);
+    try {
+        chrome.storage.local.get(['mcp_auto_approve'], (res) => {
+            if (!isExtensionValid()) {
+                console.warn("[MCP Bridge] Extension context invalidated.");
                 isExecuting = false;
                 return;
             }
-        }
-        
-        chrome.runtime.sendMessage(
-            { type: 'EXECUTE_TOOL', tool: toolCall.tool, args: toolCall.args },
-            (response) => {
-                let resultText = `[MCP Tool Result: ${toolCall.tool}]\n`;
-                if (chrome.runtime.lastError) {
-                    console.error(`%c[MCP Bridge ❌ ERROR]`, "background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;", chrome.runtime.lastError.message);
-                    resultText += `Error: ${chrome.runtime.lastError.message}`;
-                    logAuditItem(toolCall, 'error', chrome.runtime.lastError.message);
-                } else if (response && response.success) {
-                    console.log(
-                        `%c[MCP Bridge ✅ SUCCESS]%c Tool %c${toolCall.tool}%c completed successfully:`,
-                        "background: #10b981; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;",
-                        "color: inherit;",
-                        "color: #10b981; font-weight: bold;",
-                        "color: inherit;",
-                        response.result
-                    );
-                    const content = response.result.content[0].text;
-                    resultText += `\`\`\`\n${content}\n\`\`\``;
-                    logAuditItem(toolCall, 'success', 'Success');
-                } else {
-                    console.error(
-                        `%c[MCP Bridge ❌ ERROR]%c Tool %c${toolCall.tool}%c failed:`,
-                        "background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;",
-                        "color: inherit;",
-                        "color: #ef4444; font-weight: bold;",
-                        "color: inherit;",
-                        response ? response.error : 'Unknown error'
-                    );
-                    const errMsg = response ? response.error : 'Unknown error';
-                    resultText += `Error: ${errMsg}`;
-                    logAuditItem(toolCall, 'error', errMsg);
+            const isAutoApprove = res ? res.mcp_auto_approve === true : false;
+            
+            if (isSensitiveTool && !isAutoApprove) {
+                const details = toolCall.args ? JSON.stringify(toolCall.args, null, 2) : '';
+                const confirmMsg = `⚠️ SECURITY WARNING: MCP Bridge wants to execute a sensitive action:\n\nTool: ${toolCall.tool}\nArgs:\n${details}\n\nAllow execution?`;
+                if (!confirm(confirmMsg)) {
+                    console.warn(`[MCP Bridge ⛔ DENIED] User denied permission for tool: ${toolCall.tool}`);
+                    logAuditItem(toolCall, 'denied', 'User denied permission');
+                    sendResultToChatGPT(`[MCP Tool Result: ${toolCall.tool}]\nUser denied permission to execute this tool.`);
+                    isExecuting = false;
+                    return;
                 }
-                sendResultToChatGPT(resultText);
-                setTimeout(() => { isExecuting = false; }, 2000);
             }
-        );
-    });
+            
+            safeSendMessage(
+                { type: 'EXECUTE_TOOL', tool: toolCall.tool, args: toolCall.args },
+                (response) => {
+                    let resultText = `[MCP Tool Result: ${toolCall.tool}]\n`;
+                    if (!response || !response.success) {
+                        const errMsg = response ? (response.error || 'Unknown error') : 'Extension context invalidated. Refresh page.';
+                        console.error(`%c[MCP Bridge ❌ ERROR]`, "background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;", errMsg);
+                        resultText += `Error: ${errMsg}`;
+                        logAuditItem(toolCall, 'error', errMsg);
+                    } else {
+                        console.log(
+                            `%c[MCP Bridge ✅ SUCCESS]%c Tool %c${toolCall.tool}%c completed successfully:`,
+                            "background: #10b981; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;",
+                            "color: inherit;",
+                            "color: #10b981; font-weight: bold;",
+                            "color: inherit;",
+                            response.result
+                        );
+                        const content = response.result.content[0].text;
+                        resultText += `\`\`\`\n${content}\n\`\`\``;
+                        logAuditItem(toolCall, 'success', 'Success');
+                        
+                        if (content.includes('[FULL_DATA_URL]: data:image/')) {
+                            const dataUrlMatch = content.match(/\[FULL_DATA_URL\]:\s*(data:image\/[^;\s]+;base64,[^\s]+)/);
+                            const pathMatch = content.match(/\[PATH\]:\s*(.+)/);
+                            if (dataUrlMatch && dataUrlMatch[1]) {
+                                renderImagePreviewInChat(dataUrlMatch[1], pathMatch ? pathMatch[1] : toolCall.args?.path);
+                            }
+                        }
+                    }
+                    sendResultToChatGPT(resultText);
+                    setTimeout(() => { isExecuting = false; }, 2000);
+                }
+            );
+        });
+    } catch (err) {
+        console.warn("[MCP Bridge] Context error during execution:", err);
+        isExecuting = false;
+    }
+}
+
+function renderImagePreviewInChat(dataUrl, filePath) {
+    try {
+        const messages = document.querySelectorAll('article, [data-message-author-role="assistant"], .agent-turn');
+        const lastMsg = messages[messages.length - 1] || document.body;
+        
+        const previewContainer = document.createElement('div');
+        previewContainer.className = 'mcp-image-preview-card';
+        previewContainer.style.cssText = `
+            margin-top: 12px;
+            padding: 12px;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            border-radius: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-width: 520px;
+            backdrop-filter: blur(8px);
+            box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+        `;
+        
+        const header = document.createElement('div');
+        header.style.cssText = 'display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: #38bdf8; font-weight: 600; font-family: monospace;';
+        header.innerHTML = `<span>🖼️ Media Preview: ${filePath || 'Local Image'}</span>`;
+        
+        const img = document.createElement('img');
+        img.src = dataUrl;
+        img.style.cssText = 'max-width: 100%; max-height: 380px; object-fit: contain; border-radius: 6px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1);';
+        
+        const actions = document.createElement('div');
+        actions.style.cssText = 'display: flex; gap: 8px; justify-content: flex-end;';
+        
+        const openBtn = document.createElement('a');
+        openBtn.href = dataUrl;
+        openBtn.target = '_blank';
+        openBtn.innerText = '🔍 Mở ảnh gốc';
+        openBtn.style.cssText = 'padding: 4px 10px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 6px; font-size: 11px; text-decoration: none; font-weight: 600;';
+        
+        actions.appendChild(openBtn);
+        previewContainer.appendChild(header);
+        previewContainer.appendChild(img);
+        previewContainer.appendChild(actions);
+        
+        lastMsg.appendChild(previewContainer);
+    } catch (e) {
+        console.error("[MCP Bridge] Error rendering image preview:", e);
+    }
 }
 
 function isChatGPTStreaming() {
@@ -582,26 +684,36 @@ function handleManualSend(e, editor) {
                           lowerText.includes('liệt kê') || lowerText.includes('xem') ||
                           lowerText.includes('đọc') || lowerText.includes('ghi') || 
                           lowerText.includes('sửa') || lowerText.includes('tạo') ||
+                          lowerText.includes('search') || lowerText.includes('google') ||
+                          lowerText.includes('tìm kiếm') || lowerText.includes('truy cập web') ||
+                          lowerText.includes('tra cứu') || lowerText.includes('tìm trên web') ||
+                          lowerText.includes('kết quả') ||
                           isFollowUp;
                           
     const isToolResult = text.includes('[MCP Tool Result');
     
     if (needsFileOps && !isToolResult && !text.includes('mcp_tool_call')) {
-        let reminder = generateDynamicSystemInstruction(isFollowUp, lastUsedPath);
-        
-        if (editor.tagName === 'TEXTAREA' || editor.tagName === 'INPUT') {
-            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-            if (nativeInputValueSetter) {
-                nativeInputValueSetter.call(editor, reminder + '\n\n' + text);
+        chrome.storage.local.get(['mcp_presets', 'mcp_active_preset_id'], (res) => {
+            const presets = res ? (res.mcp_presets || []) : [];
+            const activeId = res ? res.mcp_active_preset_id : null;
+            const activePreset = activeId ? presets.find(p => p.id === activeId) : null;
+            
+            let reminder = generateDynamicSystemInstruction(isFollowUp, lastUsedPath, activePreset);
+            
+            if (editor.tagName === 'TEXTAREA' || editor.tagName === 'INPUT') {
+                const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+                if (nativeInputValueSetter) {
+                    nativeInputValueSetter.call(editor, reminder + '\n\n' + text);
+                } else {
+                    editor.value = reminder + '\n\n' + text;
+                }
+                editor.dispatchEvent(new Event('input', { bubbles: true }));
             } else {
-                editor.value = reminder + '\n\n' + text;
+                editor.focus();
+                document.execCommand('selectAll', false, null);
+                document.execCommand('insertText', false, reminder + '\n\n' + text);
             }
-            editor.dispatchEvent(new Event('input', { bubbles: true }));
-        } else {
-            editor.focus();
-            document.execCommand('selectAll', false, null);
-            document.execCommand('insertText', false, reminder + '\n\n' + text);
-        }
+        });
     }
 }
 

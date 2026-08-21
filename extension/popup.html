@@ -146,9 +146,90 @@
             transform: translateX(20px);
         }
 
+        /* Presets Section */
+        .preset-select-row {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .preset-dropdown {
+            flex: 1;
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 6px;
+            padding: 6px 10px;
+            color: #38bdf8;
+            font-size: 11px;
+            font-weight: 600;
+            outline: none;
+        }
+
+        .preset-dropdown:focus {
+            border-color: #38bdf8;
+        }
+
+        .preset-badge-info {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            border-radius: 6px;
+            padding: 8px 10px;
+            font-size: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-bottom: 4px;
+        }
+
+        .preset-info-path {
+            color: #38bdf8;
+            font-family: monospace;
+            word-break: break-all;
+        }
+
+        .preset-info-rules {
+            color: #94a3b8;
+            line-height: 1.3;
+        }
+
+        .preset-form {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 10px;
+            margin-top: 6px;
+        }
+
+        .preset-form input, .preset-form textarea {
+            background: rgba(30, 41, 59, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 6px;
+            padding: 6px 10px;
+            color: #f8fafc;
+            font-size: 11px;
+            outline: none;
+            font-family: inherit;
+        }
+
+        .preset-form textarea {
+            height: 48px;
+            resize: none;
+        }
+
+        .preset-form-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 2px;
+        }
+
         /* Allowed Directories Styles */
         .dir-list {
-            max-height: 130px;
+            max-height: 110px;
             overflow-y: auto;
             display: flex;
             flex-direction: column;
@@ -262,7 +343,7 @@
         }
 
         .log-list {
-            max-height: 160px;
+            max-height: 130px;
             overflow-y: auto;
             display: flex;
             flex-direction: column;
@@ -391,6 +472,39 @@
                 <input type="checkbox" id="autoApproveToggle">
                 <span class="slider"></span>
             </label>
+        </div>
+    </div>
+
+    <!-- Project Presets & Context Memory Card -->
+    <div class="card">
+        <div class="log-header">
+            <span class="log-title">
+                📌 Dự án mẫu & Ngữ cảnh
+            </span>
+            <button id="togglePresetFormBtn" class="clear-btn">+ Thêm Mới</button>
+        </div>
+        
+        <div class="preset-select-row">
+            <select id="presetSelect" class="preset-dropdown">
+                <option value="">-- Mặc định (Không dùng Preset) --</option>
+            </select>
+            <button id="delPresetBtn" class="dir-del-btn" title="Xóa Preset đang chọn">🗑️</button>
+        </div>
+
+        <div id="activePresetBadge" class="preset-badge-info" style="display: none;">
+            <div class="preset-info-path">📁 <span id="presetPathText">/path/to/folder</span></div>
+            <div class="preset-info-rules">📝 <span id="presetRulesText">Rules preview...</span></div>
+        </div>
+
+        <!-- Add Preset Form (Hidden by default) -->
+        <div id="presetForm" class="preset-form" style="display: none;">
+            <input type="text" id="presetNameInput" placeholder="Tên Preset (VD: Landing Page HTML/CSS)">
+            <input type="text" id="presetPathInput" placeholder="Đường dẫn thư mục dự án">
+            <textarea id="presetRulesInput" placeholder="Quy tắc/Prompt ngữ cảnh mẫu (VD: Tách biệt index.html, style.css...)"></textarea>
+            <div class="preset-form-actions">
+                <button id="savePresetBtn" class="btn-add">💾 Lưu Preset</button>
+                <button id="cancelPresetBtn" class="clear-btn">Hủy</button>
+            </div>
         </div>
     </div>
 

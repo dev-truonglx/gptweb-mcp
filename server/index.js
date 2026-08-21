@@ -139,8 +139,136 @@ const tools = {
             accessed: stats.atime
         };
         return { content: [{ type: "text", text: JSON.stringify(info, null, 2) }] };
+    },
+    fetch_url: async (args) => {
+        if (!args.url) throw new Error("URL parameter is required.");
+        const response = await fetch(args.url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (MCP Bridge Web Fetcher)' }
+        });
+        const text = await response.text();
+        if (args.raw) {
+            return { content: [{ type: "text", text: `[HTTP Status ${response.status}]\n${text.slice(0, 20000)}` }] };
+        }
+        const cleanedText = htmlToText(text);
+        return { content: [{ type: "text", text: `[HTTP Status ${response.status} URL: ${args.url}]\n${cleanedText.slice(0, 15000)}` }] };
+    },
+    http_request: async (args) => {
+        if (!args.url) throw new Error("URL parameter is required.");
+        const method = (args.method || 'GET').toUpperCase();
+        const headers = args.headers || {};
+        let body = undefined;
+        
+        if (args.body) {
+            if (typeof args.body === 'object') {
+                body = JSON.stringify(args.body);
+                if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+            } else {
+                body = String(args.body);
+            }
+        }
+        
+        const response = await fetch(args.url, { method, headers, body });
+        const resText = await response.text();
+        
+        let output = `[HTTP RESPONSE ${response.status} ${response.statusText}]\n`;
+        output += `[URL]: ${args.url}\n`;
+        output += `[METHOD]: ${method}\n\n`;
+        output += `[BODY]:\n${resText.slice(0, 15000)}`;
+        
+        return { content: [{ type: "text", text: output }] };
+    },
+    google_search: async (args) => {
+        if (!args.query) throw new Error("Search query parameter is required.");
+        const count = args.count ? parseInt(args.count, 10) : 5;
+        const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(args.query)}`, {
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0"
+            }
+        });
+        const html = await res.text();
+        const results = [];
+
+        const linkRegex = /<a\b[^>]*class=["']result__a["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+        const snippetRegex = /<(?:a|td)\b[^>]*class=["']result__snippet["'][^>]*>([\s\S]*?)<\/(?:a|td)>/gi;
+
+        const titlesAndLinks = [];
+        let tm;
+        while ((tm = linkRegex.exec(html)) !== null) {
+            let rawUrl = tm[1];
+            if (rawUrl.includes("uddg=")) {
+                const um = rawUrl.match(/uddg=([^&]+)/);
+                if (um) rawUrl = decodeURIComponent(um[1]);
+            }
+            const title = tm[2].replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").trim();
+            titlesAndLinks.push({ title, url: rawUrl });
+        }
+
+        const snippets = [];
+        let sm;
+        while ((sm = snippetRegex.exec(html)) !== null) {
+            let snip = (sm[1] || sm[2] || "").replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").trim();
+            snippets.push(snip);
+        }
+
+        for (let i = 0; i < Math.min(titlesAndLinks.length, count); i++) {
+            results.push({
+                rank: i + 1,
+                title: titlesAndLinks[i].title,
+                url: titlesAndLinks[i].url,
+                snippet: snippets[i] || ""
+            });
+        }
+
+        let output = `[SEARCH RESULTS FOR QUERY: "${args.query}" (Top ${results.length})]\n\n`;
+        results.forEach(r => {
+            output += `${r.rank}. ${r.title}\n   URL: ${r.url}\n   Snippet: ${r.snippet}\n\n`;
+        });
+
+        return { content: [{ type: "text", text: output.trim() }] };
+    },
+    web_search: async (args) => {
+        return tools.google_search(args);
+    },
+    read_image: async (args) => {
+        const { path: validPath, stats } = await validateExistingPath(args.path);
+        if (!stats.isFile()) {
+            throw new Error(`Path is not a file: ${validPath}`);
+        }
+        
+        const ext = path.extname(validPath).toLowerCase();
+        const mimeTypes = {
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.gif': 'image/gif',
+            '.webp': 'image/webp',
+            '.svg': 'image/svg+xml'
+        };
+        
+        const mimeType = mimeTypes[ext] || 'application/octet-stream';
+        const imageBuffer = await fs.readFile(validPath);
+        const base64Data = imageBuffer.toString('base64');
+        const dataUrl = `data:${mimeType};base64,${base64Data}`;
+        
+        let output = `[IMAGE PREVIEW DATA]\n`;
+        output += `[PATH]: ${validPath}\n`;
+        output += `[MIME]: ${mimeType}\n`;
+        output += `[SIZE]: ${stats.size} bytes\n`;
+        output += `[FULL_DATA_URL]: ${dataUrl}`;
+        
+        return { content: [{ type: "text", text: output }] };
     }
 };
+
+function htmlToText(html) {
+    if (!html) return "";
+    return html
+        .replace(/<script\b[^<]*>([\s\S]*?)<\/script>/gi, '')
+        .replace(/<style\b[^<]*>([\s\S]*?)<\/style>/gi, '')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
 
 function getTimestamp() {
     return new Date().toLocaleTimeString('vi-VN', { hour12: false }) + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
@@ -258,57 +386,101 @@ app.get("/tools", (req, res) => {
         tools: [
             {
                 name: "list_directory",
+                sensitive: false,
                 description: "List files and subfolders in a folder or directory",
                 parameters: { path: "Path to directory" },
                 example: '{"mcp_tool_call": true, "tool": "list_directory", "args": {"path": "C:\\\\Users\\\\..."}}'
             },
             {
                 name: "read_file",
+                sensitive: false,
                 description: "Read the complete text content of a specific file",
                 parameters: { path: "Path to file" },
                 example: '{"mcp_tool_call": true, "tool": "read_file", "args": {"path": "C:\\\\path\\\\to\\\\file.txt"}}'
             },
             {
                 name: "write_file",
+                sensitive: true,
                 description: "Write or overwrite content in a file",
                 parameters: { path: "Path to file", content: "Content string" },
                 example: '{"mcp_tool_call": true, "tool": "write_file", "args": {"path": "C:\\\\path\\\\to\\\\file.txt", "content": "..."}}'
             },
             {
                 name: "execute_command",
+                sensitive: true,
                 description: "Execute a shell terminal command (e.g. git status, npm test, python, etc.)",
                 parameters: { command: "Command string to run", cwd: "Optional working directory" },
                 example: '{"mcp_tool_call": true, "tool": "execute_command", "args": {"command": "git status"}}'
             },
             {
                 name: "delete_file",
+                sensitive: true,
                 description: "Delete a file or directory",
                 parameters: { path: "Path to file or folder to delete" },
                 example: '{"mcp_tool_call": true, "tool": "delete_file", "args": {"path": "C:\\\\path\\\\to\\\\file.tmp"}}'
             },
             {
                 name: "create_directory",
+                sensitive: true,
                 description: "Create a new directory (creates parent folders recursively if needed)",
                 parameters: { path: "Path to directory to create" },
                 example: '{"mcp_tool_call": true, "tool": "create_directory", "args": {"path": "C:\\\\path\\\\to\\\\folder"}}'
             },
             {
                 name: "move_file",
+                sensitive: true,
                 description: "Move or rename a file or directory",
                 parameters: { source: "Source path", destination: "Destination path" },
                 example: '{"mcp_tool_call": true, "tool": "move_file", "args": {"source": "C:\\\\old.txt", "destination": "C:\\\\new.txt"}}'
             },
             {
                 name: "search_files",
+                sensitive: false,
                 description: "Search for files and folders inside a directory matching a pattern",
                 parameters: { directory: "Path to directory to search", pattern: "Optional glob pattern like *.js" },
                 example: '{"mcp_tool_call": true, "tool": "search_files", "args": {"directory": "C:\\\\Users\\\\...", "pattern": "*.js"}}'
             },
             {
                 name: "get_file_info",
+                sensitive: false,
                 description: "Get file or directory metadata (size, created/modified time, type)",
                 parameters: { path: "Path to file or directory" },
                 example: '{"mcp_tool_call": true, "tool": "get_file_info", "args": {"path": "C:\\\\path\\\\to\\\\file.txt"}}'
+            },
+            {
+                name: "fetch_url",
+                sensitive: false,
+                description: "Fetch web page content or HTML/text from a URL and convert to clean text",
+                parameters: { url: "URL to fetch", raw: "Optional boolean for raw HTML" },
+                example: '{"mcp_tool_call": true, "tool": "fetch_url", "args": {"url": "http://localhost:3000"}}'
+            },
+            {
+                name: "http_request",
+                sensitive: true,
+                description: "Send HTTP API requests (GET, POST, PUT, DELETE, PATCH) with headers and JSON body to test APIs",
+                parameters: { url: "Target API URL", method: "GET/POST/PUT/DELETE", headers: "Object of headers", body: "Request body object or string" },
+                example: '{"mcp_tool_call": true, "tool": "http_request", "args": {"url": "http://localhost:8889/health", "method": "GET"}}'
+            },
+            {
+                name: "google_search",
+                sensitive: false,
+                description: "Search Google/web for a query keyword and return top search result titles, URLs, and snippets",
+                parameters: { query: "Search query keyword", count: "Optional number of top results (default 5)" },
+                example: '{"mcp_tool_call": true, "tool": "google_search", "args": {"query": "phimmoi", "count": 5}}'
+            },
+            {
+                name: "web_search",
+                sensitive: false,
+                description: "Search the web for a query keyword (alias for google_search)",
+                parameters: { query: "Search query keyword", count: "Optional number of top results (default 5)" },
+                example: '{"mcp_tool_call": true, "tool": "web_search", "args": {"query": "phimmoi", "count": 5}}'
+            },
+            {
+                name: "read_image",
+                sensitive: false,
+                description: "Read a local image file (.png, .jpg, .jpeg, .gif, .webp, .svg) and return Base64 Data URL for preview and visual inspection",
+                parameters: { path: "Path to image file" },
+                example: '{"mcp_tool_call": true, "tool": "read_image", "args": {"path": "C:\\\\path\\\\to\\\\image.png"}}'
             }
         ]
     });
