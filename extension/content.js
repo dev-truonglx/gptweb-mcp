@@ -848,14 +848,18 @@ function processNewMessages() {
         return;
     }
 
-    const text = lastMsg.innerText || lastMsg.textContent || "";
+    // Inspect raw text from element OR hidden raw text fallback container
+    const rawElementText = lastMsg.innerText || lastMsg.textContent || "";
+    const hiddenRawText = lastMsg.querySelector('.mcp-raw-text')?.textContent || "";
+    const text = hiddenRawText ? (hiddenRawText + "\n" + rawElementText) : rawElementText;
+
     const allCalls = extractAllToolCalls(text);
     const toolCall = extractNextUnexecutedToolCall(text);
     const streaming = isChatGPTStreaming();
 
     if (streaming) {
         // ALWAYS wait for ChatGPT to finish typing/streaming completely before executing tool call!
-        setBridgeStatus(STATUS_STATES.PROCESSING, 'ChatGPT đang tạo phản hồi...');
+        setBridgeStatus(STATUS_STATES.PROCESSING, 'ChatGPT đang suy luận & tạo câu trả lời...');
         return;
     }
 
@@ -873,8 +877,11 @@ function processNewMessages() {
             setBridgeStatus(STATUS_STATES.PROCESSING, 'ChatGPT đang tạo phản hồi...');
         } else {
             lastMsg.setAttribute('data-mcp-processed', 'true');
-            if (waitingForResponse) {
+            if (waitingForResponse || executedToolCalls.size > 0) {
                 waitingForResponse = false;
+                setBridgeStatus(STATUS_STATES.COMPLETED, 'Tất cả tác vụ MCP đã xử lý xong!');
+                markLastMessageCompleted(lastMsg);
+            } else {
                 setBridgeStatus(STATUS_STATES.IDLE);
             }
         }
