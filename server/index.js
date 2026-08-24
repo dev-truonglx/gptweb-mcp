@@ -513,107 +513,107 @@ app.get("/tools", (req, res) => {
             {
                 name: "list_directory",
                 sensitive: false,
-                description: "List files and subfolders in a folder or directory",
+                description: "List files and subfolders in a folder or directory (e.g. liệt kê file, xem thư mục, danh sách tệp, show folder, cây thư mục)",
                 parameters: { path: "Path to directory" },
-                example: '{"mcp_tool_call": true, "tool": "list_directory", "args": {"path": "C:\\\\Users\\\\..."}}'
+                example: '{"tool": "list_directory", "args": {"path": "/path/to/directory"}}'
             },
             {
                 name: "read_file",
                 sensitive: false,
-                description: "Read the complete text content of a specific file",
+                description: "Read the complete text content of a specific file (e.g. đọc file, xem nội dung file, mở file, kiểm tra file)",
                 parameters: { path: "Path to file" },
-                example: '{"mcp_tool_call": true, "tool": "read_file", "args": {"path": "C:\\\\path\\\\to\\\\file.txt"}}'
+                example: '{"tool": "read_file", "args": {"path": "/path/to/file.txt"}}'
             },
             {
                 name: "write_file",
                 sensitive: true,
-                description: "Write or overwrite content in a file",
+                description: "Write or overwrite content in a file (e.g. ghi file, tạo file, lưu file, sửa file, cập nhật file, xuất file)",
                 parameters: { path: "Path to file", content: "Content string" },
-                example: '{"mcp_tool_call": true, "tool": "write_file", "args": {"path": "C:\\\\path\\\\to\\\\file.txt", "content": "..."}}'
+                example: '{"tool": "write_file", "args": {"path": "/path/to/file.txt", "content": "..."}}'
             },
             {
                 name: "execute_command",
                 sensitive: true,
-                description: "Execute a shell terminal command (e.g. git status, npm test, python, etc.)",
+                description: "Execute a shell terminal command (e.g. chạy lệnh terminal, thực thi lệnh, npm test, git status, build)",
                 parameters: { command: "Command string to run", cwd: "Optional working directory" },
-                example: '{"mcp_tool_call": true, "tool": "execute_command", "args": {"command": "git status"}}'
+                example: '{"tool": "execute_command", "args": {"command": "git status"}}'
             },
             {
                 name: "delete_file",
                 sensitive: true,
-                description: "Delete a file or directory",
+                description: "Delete a file or directory (e.g. xóa file, xóa thư mục, gỡ bỏ file, dọn dẹp file rác)",
                 parameters: { path: "Path to file or folder to delete" },
-                example: '{"mcp_tool_call": true, "tool": "delete_file", "args": {"path": "C:\\\\path\\\\to\\\\file.tmp"}}'
+                example: '{"tool": "delete_file", "args": {"path": "/path/to/file.tmp"}}'
             },
             {
                 name: "create_directory",
                 sensitive: true,
-                description: "Create a new directory (creates parent folders recursively if needed)",
+                description: "Create a new directory (e.g. tạo folder, tạo thư mục, tạo danh mục mới, mkdir)",
                 parameters: { path: "Path to directory to create" },
-                example: '{"mcp_tool_call": true, "tool": "create_directory", "args": {"path": "C:\\\\path\\\\to\\\\folder"}}'
+                example: '{"tool": "create_directory", "args": {"path": "/path/to/folder"}}'
             },
             {
                 name: "move_file",
                 sensitive: true,
-                description: "Move or rename a file or directory",
-                parameters: { source: "Source path", destination: "Destination path" },
-                example: '{"mcp_tool_call": true, "tool": "move_file", "args": {"source": "C:\\\\old.txt", "destination": "C:\\\\new.txt"}}'
+                description: "Move, transfer, organize, categorize, or rename a file or directory (e.g. di chuyển file, chuyển file vào folder, dọn dẹp file, phân loại file, đổi tên file)",
+                parameters: { source: "Source path of file or directory", destination: "Destination path of file or directory" },
+                example: '{"tool": "move_file", "args": {"source": "/path/to/source.txt", "destination": "/path/to/destination.txt"}}'
             },
             {
                 name: "search_files",
                 sensitive: false,
-                description: "Search for files and folders inside a directory matching a pattern",
+                description: "Search for files and folders inside a directory matching a pattern (e.g. tìm kiếm file, tìm file theo tên, tìm đuôi .js, tra cứu file)",
                 parameters: { directory: "Path to directory to search", pattern: "Optional glob pattern like *.js" },
-                example: '{"mcp_tool_call": true, "tool": "search_files", "args": {"directory": "C:\\\\Users\\\\...", "pattern": "*.js"}}'
+                example: '{"tool": "search_files", "args": {"directory": "/path/to/directory", "pattern": "*.js"}}'
             },
             {
                 name: "get_file_info",
                 sensitive: false,
-                description: "Get file or directory metadata (size, created/modified time, type)",
+                description: "Get file or directory metadata (e.g. xem thông tin file, kiểm tra dung lượng file, xem ngày tạo, kích thước file)",
                 parameters: { path: "Path to file or directory" },
-                example: '{"mcp_tool_call": true, "tool": "get_file_info", "args": {"path": "C:\\\\path\\\\to\\\\file.txt"}}'
+                example: '{"tool": "get_file_info", "args": {"path": "/path/to/file.txt"}}'
             },
             {
                 name: "fetch_url",
                 sensitive: false,
-                description: "Fetch web page content or HTML/text from a URL and convert to clean text",
+                description: "Fetch web page content or HTML/text from a URL (e.g. đọc trang web, truy cập URL, lấy nội dung web, xem website)",
                 parameters: { url: "URL to fetch", raw: "Optional boolean for raw HTML" },
-                example: '{"mcp_tool_call": true, "tool": "fetch_url", "args": {"url": "http://localhost:3000"}}'
+                example: '{"tool": "fetch_url", "args": {"url": "http://localhost:3000"}}'
             },
             {
                 name: "http_request",
                 sensitive: true,
-                description: "Send HTTP API requests (GET, POST, PUT, DELETE, PATCH) with headers and JSON body to test APIs",
+                description: "Send HTTP API requests (GET, POST, PUT, DELETE, PATCH) (e.g. gửi request API, test API, gọi REST API)",
                 parameters: { url: "Target API URL", method: "GET/POST/PUT/DELETE", headers: "Object of headers", body: "Request body object or string" },
-                example: '{"mcp_tool_call": true, "tool": "http_request", "args": {"url": "http://localhost:8889/health", "method": "GET"}}'
+                example: '{"tool": "http_request", "args": {"url": "http://localhost:8889/health", "method": "GET"}}'
             },
             {
                 name: "google_search",
                 sensitive: false,
-                description: "Search Google/web for a query keyword and return top search result titles, URLs, and snippets",
+                description: "Search Google/web for a query keyword (e.g. tìm kiếm google, search web, tra cứu thông tin, tìm trên mạng)",
                 parameters: { query: "Search query keyword", count: "Optional number of top results (default 5)" },
-                example: '{"mcp_tool_call": true, "tool": "google_search", "args": {"query": "phimmoi", "count": 5}}'
+                example: '{"tool": "google_search", "args": {"query": "phimmoi", "count": 5}}'
             },
             {
                 name: "web_search",
                 sensitive: false,
                 description: "Search the web for a query keyword (alias for google_search)",
                 parameters: { query: "Search query keyword", count: "Optional number of top results (default 5)" },
-                example: '{"mcp_tool_call": true, "tool": "web_search", "args": {"query": "phimmoi", "count": 5}}'
+                example: '{"tool": "web_search", "args": {"query": "phimmoi", "count": 5}}'
             },
             {
                 name: "read_image",
                 sensitive: false,
-                description: "Read a local image file (.png, .jpg, .jpeg, .gif, .webp, .svg) and return Base64 Data URL for preview and visual inspection",
+                description: "Read a local image file (.png, .jpg, .svg) and return Base64 Data URL (e.g. xem hình ảnh, đọc ảnh, hiển thị ảnh)",
                 parameters: { path: "Path to image file" },
-                example: '{"mcp_tool_call": true, "tool": "read_image", "args": {"path": "C:\\\\path\\\\to\\\\image.png"}}'
+                example: '{"tool": "read_image", "args": {"path": "/path/to/image.png"}}'
             },
             {
                 name: "get_project_tree",
                 sensitive: false,
-                description: "Generate a clean ASCII directory tree and project code statistics (file count, total LOC lines of code, file types breakdown)",
+                description: "Generate a clean directory tree and project code statistics (e.g. sơ đồ dự án, cây thư mục dự án, cấu trúc codebase, thống kê dự án)",
                 parameters: { path: "Path to project directory", depth: "Optional max depth (default 4)" },
-                example: '{"mcp_tool_call": true, "tool": "get_project_tree", "args": {"path": "C:\\\\path\\\\to\\\\project"}}'
+                example: '{"tool": "get_project_tree", "args": {"path": "/path/to/project"}}'
             }
         ]
     });

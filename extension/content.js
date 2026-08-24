@@ -106,7 +106,10 @@ function generateDynamicSystemInstruction(isFollowUp, lastUsedPath, activePreset
     reminder += `\nCRITICAL RULES:\n`;
     reminder += `- YOU HAVE FULL AUTHORIZED ACCESS to the local filesystem via MCP Bridge.\n`;
     reminder += `- NEVER claim you lack access. NEVER output {"error": ...} or refusal text.\n`;
-    reminder += `- Match the correct tool for the user's intent. When the user asks to list, show, or view files/folders in a folder or directory, YOU MUST USE "list_directory". DO NOT use "read_file" on a directory path!\n`;
+    reminder += `- NATURAL LANGUAGE INTENT MAPPING:\n`;
+    reminder += `  * When user asks to move, transfer, organize, categorize, or rename files/folders (e.g. "di chuyển file", "chuyển file vào folder", "dọn dẹp file", "phân loại file", "move file"), YOU MUST USE "move_file" with {"source": "...", "destination": "..."}.\n`;
+    reminder += `  * When user asks to create or make folders (e.g. "tạo folder", "tạo thư mục", "mkdir"), YOU MUST USE "create_directory" with {"path": "..."}.\n`;
+    reminder += `  * When user asks to list, show, or view contents of a directory (e.g. "liệt kê file", "xem thư mục"), YOU MUST USE "list_directory" with {"path": "..."}.\n`;
     reminder += `- FOR MULTI-STEP TASKS: If you need to inspect subfolders or run more actions, YOU MUST IMMEDIATELY OUTPUT THE NEXT JSON TOOL CALL object. DO NOT output conversational promise text (e.g. "Mình sẽ tiếp tục...") without the JSON tool call.\n`;
     reminder += `- Output ONLY the JSON block with "mcp_tool_call": true until all steps are done.]`;
 
