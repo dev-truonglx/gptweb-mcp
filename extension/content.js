@@ -521,26 +521,6 @@ function executeToolAndSendResult(toolCall) {
                                 renderImagePreviewInChat(dataUrlMatch[1], pathMatch ? pathMatch[1] : toolCall.args?.path);
                             }
                         }
-
-                        if (content.includes('[DIFF_DATA]:')) {
-                            const diffMatch = content.match(/\[DIFF_DATA\]:\s*(\{[\s\S]+\})/);
-                            if (diffMatch && diffMatch[1]) {
-                                try {
-                                    const diffData = JSON.parse(diffMatch[1]);
-                                    const diffEntry = {
-                                        id: 'diff_' + Date.now(),
-                                        time: new Date().toLocaleTimeString('vi-VN', { hour12: false }),
-                                        path: diffData.path,
-                                        addedLines: diffData.addedLines,
-                                        deletedLines: diffData.deletedLines,
-                                        diffLines: diffData.diffLines
-                                    };
-                                    safeSendMessage({ type: 'SAVE_DIFF', diff: diffEntry });
-                                } catch (e) {
-                                    console.error("[MCP Bridge] Error parsing diff data:", e);
-                                }
-                            }
-                        }
                     }
                     sendResultToChatGPT(resultText);
                     setTimeout(() => { isExecuting = false; }, 2000);

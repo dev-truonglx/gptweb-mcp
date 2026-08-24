@@ -3,15 +3,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const serverStatusText = document.getElementById('serverStatusText');
     const autoApproveToggle = document.getElementById('autoApproveToggle');
     
-    // Diff elements
-    const diffSelect = document.getElementById('diffSelect');
-    const clearDiffsBtn = document.getElementById('clearDiffsBtn');
-    const diffViewerBox = document.getElementById('diffViewerBox');
-    const diffFilePathText = document.getElementById('diffFilePathText');
-    const diffStatsBadge = document.getElementById('diffStatsBadge');
-    const diffLinesContainer = document.getElementById('diffLinesContainer');
-    const emptyDiffText = document.getElementById('emptyDiffText');
-
     // Preset elements
     const togglePresetFormBtn = document.getElementById('togglePresetFormBtn');
     const presetSelect = document.getElementById('presetSelect');
@@ -36,7 +27,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let currentAllowedDirs = [];
     let currentPresets = [];
-    let currentDiffs = [];
     let activePresetId = null;
 
     function escapeHtml(str) {
@@ -72,83 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
         chrome.storage.local.set({ mcp_auto_approve: isChecked });
     });
 
-    // 3. Render Code Diffs
-    function renderDiffs() {
-        chrome.runtime.sendMessage({ type: 'GET_DIFFS' }, (res) => {
-            if (!res || !res.success) return;
-            currentDiffs = res.diffs || [];
-
-            diffSelect.innerHTML = '<option value="">-- Chọn file vừa sửa để xem Diff --</option>';
-            if (currentDiffs.length === 0) {
-                emptyDiffText.style.display = 'block';
-                diffViewerBox.style.display = 'none';
-                return;
-            }
-
-            emptyDiffText.style.display = 'none';
-            currentDiffs.forEach(d => {
-                const opt = document.createElement('option');
-                opt.value = d.id;
-                const fileName = d.path ? d.path.split(/[/\\]/).pop() : 'file';
-                opt.innerText = `${d.time} - ${fileName} (+${d.addedLines || 0}/-${d.deletedLines || 0})`;
-                diffSelect.appendChild(opt);
-            });
-
-            // Auto-select most recent diff
-            if (currentDiffs.length > 0) {
-                diffSelect.value = currentDiffs[0].id;
-                showSelectedDiff(currentDiffs[0]);
-            }
-        });
-    }
-
-    function showSelectedDiff(diffEntry) {
-        if (!diffEntry) {
-            diffViewerBox.style.display = 'none';
-            return;
-        }
-
-        diffViewerBox.style.display = 'block';
-        diffFilePathText.innerText = diffEntry.path || 'N/A';
-        diffStatsBadge.innerText = `+${diffEntry.addedLines || 0} / -${diffEntry.deletedLines || 0}`;
-
-        const linesHtml = (diffEntry.diffLines || []).map(line => {
-            let cls = 'diff-line-normal';
-            let prefix = ' ';
-            let numStr = line.newNum || line.oldNum || '';
-
-            if (line.type === 'add') {
-                cls = 'diff-line-add';
-                prefix = '+';
-            } else if (line.type === 'del') {
-                cls = 'diff-line-del';
-                prefix = '-';
-            }
-
-            return `
-                <div class="diff-line ${cls}">
-                    <span class="diff-line-num">${numStr}</span>
-                    <span class="diff-line-text">${prefix} ${escapeHtml(line.text)}</span>
-                </div>
-            `;
-        }).join('');
-
-        diffLinesContainer.innerHTML = linesHtml;
-    }
-
-    diffSelect.addEventListener('change', () => {
-        const selectedId = diffSelect.value;
-        const selectedDiff = currentDiffs.find(d => d.id === selectedId);
-        showSelectedDiff(selectedDiff);
-    });
-
-    clearDiffsBtn.addEventListener('click', () => {
-        chrome.runtime.sendMessage({ type: 'CLEAR_DIFFS' }, () => {
-            renderDiffs();
-        });
-    });
-
-    // 4. Render Presets
+    // 3. Render Presets
     function renderPresets() {
         chrome.runtime.sendMessage({ type: 'GET_PRESETS' }, (res) => {
             if (!res || !res.success) return;
@@ -351,7 +265,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     refreshBtn.addEventListener('click', () => {
         checkServerStatus();
-        renderDiffs();
         renderPresets();
         renderAllowedDirs();
         renderAuditLogs();
@@ -359,7 +272,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initial Load
     checkServerStatus();
-    renderDiffs();
     renderPresets();
     renderAllowedDirs();
     renderAuditLogs();

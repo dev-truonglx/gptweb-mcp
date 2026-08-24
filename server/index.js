@@ -72,31 +72,8 @@ const tools = {
         const validPath = await validatePath(args.path);
         const dir = path.dirname(validPath);
         await fs.mkdir(dir, { recursive: true });
-        
-        let oldContent = "";
-        try {
-            oldContent = await fs.readFile(validPath, "utf-8");
-        } catch (e) {
-            oldContent = "";
-        }
-        
-        const diff = generateLineDiff(oldContent, args.content);
-        const addedCount = diff.filter(d => d.type === 'add').length;
-        const delCount = diff.filter(d => d.type === 'del').length;
-        
         await fs.writeFile(validPath, args.content, "utf-8");
-        
-        const diffData = {
-            path: validPath,
-            addedLines: addedCount,
-            deletedLines: delCount,
-            diffLines: diff.slice(0, 500)
-        };
-        
-        let output = `Successfully wrote to ${validPath} (+${addedCount} / -${delCount} lines)\n`;
-        output += `[DIFF_DATA]: ${JSON.stringify(diffData)}`;
-        
-        return { content: [{ type: "text", text: output }] };
+        return { content: [{ type: "text", text: `Successfully wrote to ${validPath}` }] };
     },
     execute_command: async (args) => {
         const targetCwd = args.cwd ? await validatePath(args.cwd) : process.cwd();
@@ -135,13 +112,18 @@ const tools = {
         return { content: [{ type: "text", text: `Successfully moved ${validSource} to ${validDest}` }] };
     },
     search_files: async (args) => {
-        const { path: validPath, stats } = await validateExistingPath(args.directory);
+        const targetPath = args.path || args.directory;
+        if (!targetPath) {
+            throw new Error("Parameter 'path' or 'directory' is required for search_files.");
+        }
+        const { path: validPath, stats } = await validateExistingPath(targetPath);
         if (!stats.isDirectory()) {
             return { content: [{ type: "text", text: `Error: ${validPath} is a file, not a directory.` }], isError: true };
         }
         const entries = await fs.readdir(validPath, { recursive: true, withFileTypes: true });
         let matches = entries.map(e => {
-            const relative = path.relative(validPath, path.join(e.parentPath || validPath, e.name));
+            const parent = e.parentPath || e.path || validPath;
+            const relative = path.relative(validPath, path.join(parent, e.name));
             return `${e.isDirectory() ? '[DIR]' : '[FILE]'} ${relative}`;
         });
         if (args.pattern) {
@@ -403,59 +385,6 @@ const tools = {
         return { content: [{ type: "text", text: summary.trim() }] };
     }
 };
-
-function generateLineDiff(oldText, newText) {
-    const oldLines = (oldText || "").split('\n');
-    const newLines = (newText || "").split('\n');
-    
-    const diff = [];
-    let i = 0, j = 0;
-    
-    while (i < oldLines.length || j < newLines.length) {
-        if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
-            diff.push({ type: 'normal', oldNum: i + 1, newNum: j + 1, text: oldLines[i] });
-            i++;
-            j++;
-        } else {
-            let foundOld = -1;
-            let foundNew = -1;
-            
-            for (let look = 1; look < 10; look++) {
-                if (i + look < oldLines.length && j < newLines.length && oldLines[i + look] === newLines[j]) {
-                    foundOld = i + look;
-                    break;
-                }
-                if (j + look < newLines.length && i < oldLines.length && newLines[j + look] === oldLines[i]) {
-                    foundNew = j + look;
-                    break;
-                }
-            }
-            
-            if (foundOld !== -1) {
-                while (i < foundOld) {
-                    diff.push({ type: 'del', oldNum: i + 1, newNum: null, text: oldLines[i] });
-                    i++;
-                }
-            } else if (foundNew !== -1) {
-                while (j < foundNew) {
-                    diff.push({ type: 'add', oldNum: null, newNum: j + 1, text: newLines[j] });
-                    j++;
-                }
-            } else {
-                if (i < oldLines.length) {
-                    diff.push({ type: 'del', oldNum: i + 1, newNum: null, text: oldLines[i] });
-                    i++;
-                }
-                if (j < newLines.length) {
-                    diff.push({ type: 'add', oldNum: null, newNum: j + 1, text: newLines[j] });
-                    j++;
-                }
-            }
-        }
-    }
-    
-    return diff;
-}
 
 function htmlToText(html) {
     if (!html) return "";
